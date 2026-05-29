@@ -1,0 +1,10 @@
+.venv/
+__pycache__/
+*.pyc
+/mnt/
+.uv/
+
+*.egg-info/
+test_*.py
+gen_test.py
+
