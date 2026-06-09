@@ -3,10 +3,6 @@ import polars as pl
 from pathlib import Path
 
 
-# 默认数据路径
-DEFAULT_DATA_PATH = "/mnt/readonly_dataset"
-
-
 # ============== stock_quote ==============
 
 STOCK_QUOTE_FLOAT_COLS = [
@@ -17,9 +13,9 @@ STOCK_QUOTE_STR_COLS = ["证券简称"]
 
 
 def convert_stock_quote(
-    data_path: str = DEFAULT_DATA_PATH,
-    source: str = "finance_sina",
-    output_dir: str = "/mnt/dataset",
+    data_path: str,
+    source: str,
+    output_dir: str,
 ) -> int:
     """将每日股票行情数据转换为每个股票的历史数据"""
     source_path = Path(data_path) / source / "stock_quote"
@@ -82,9 +78,9 @@ MARGIN_TRADE_COL_MAP = {
 
 
 def convert_margin_trade(
-    data_path: str = DEFAULT_DATA_PATH,
-    source: str = "eastmoney",
-    output_dir: str = "/mnt/dataset",
+    data_path: str,
+    source: str,
+    output_dir: str,
 ) -> int:
     """将每日融资融券数据转换为每个标的的历史数据"""
     source_path = Path(data_path) / source / "margin_trade"
@@ -152,8 +148,8 @@ def convert_margin_trade(
 # ============== margin_trade_daily ==============
 
 def convert_margin_trade_daily(
-    input_dir: str = "/mnt/dataset/margin_trade_history",
-    output_dir: str = "/mnt/dataset/margin_trade_daily",
+    input_dir: str,
+    output_dir: str,
 ) -> int:
     """从个股文件中提取净变化数据，生成每日汇总文件。
     一次性读入所有标的的净变化列，按日期分组输出。
@@ -197,8 +193,8 @@ PRICE_COLS = ["prev_close", "open", "high", "low", "close"]
 
 
 def convert_adjust(
-    input_dir: str = "/mnt/dataset/stock_quote_history",
-    output_dir: str = "/mnt/dataset/stock_quote_adjusted",
+    input_dir: str,
+    output_dir: str,
 ) -> int:
     """前复权：将股票历史价格按最新价格向前调整"""
     input_path = Path(input_dir)
@@ -251,8 +247,8 @@ def convert_adjust(
 # ============== ma ==============
 
 def convert_ma(
-    input_dir: str = "/mnt/dataset/stock_quote_adjusted",
-    output_dir: str = "/mnt/dataset/stock_quote_ma",
+    input_dir: str,
+    output_dir: str,
 ) -> int:
     """基于前复权数据计算 close 的滚动均线"""
     input_path = Path(input_dir)
@@ -289,8 +285,8 @@ def convert_ma(
 # ============== boll ==============
 
 def convert_boll(
-    input_dir: str = "/mnt/dataset/stock_quote_adjusted",
-    output_dir: str = "/mnt/dataset/stock_quote_boll",
+    input_dir: str,
+    output_dir: str,
 ) -> int:
     """基于前复权数据计算布林带（period=20/60, k=2）"""
     input_path = Path(input_dir)
@@ -332,8 +328,8 @@ def convert_boll(
 # ============== index ma/boll ==============
 
 def convert_index_ma(
-    input_dir: str = "/mnt/dataset/index_quote_history",
-    output_dir: str = "/mnt/dataset/index_quote_ma",
+    input_dir: str,
+    output_dir: str,
 ) -> int:
     """基于指数行情计算 close 和 turnover 的滚动均线"""
     windows = [5, 10, 20, 60, 120, 250]
@@ -341,8 +337,8 @@ def convert_index_ma(
 
 
 def convert_index_boll(
-    input_dir: str = "/mnt/dataset/index_quote_history",
-    output_dir: str = "/mnt/dataset/index_quote_boll",
+    input_dir: str,
+    output_dir: str,
 ) -> int:
     """基于指数行情计算布林带（period=20/60, k=2）"""
     return _compute_boll(input_dir, output_dir, [20, 60], "indices")
@@ -436,8 +432,8 @@ FWD_PREFIX_COLS = ["high", "high_day", "high_pct", "low", "low_day", "low_pct", 
 
 
 def convert_fwd_return(
-    input_dir: str = "/mnt/dataset/stock_quote_adjusted",
-    output_dir: str = "/mnt/dataset/stock_fwd_return",
+    input_dir: str,
+    output_dir: str,
 ) -> int:
     """基于复权后数据，计算每日的未来5/10日收益率特征"""
     input_path = Path(input_dir)
@@ -458,6 +454,47 @@ def convert_fwd_return(
         df = _compute_fwd(df, 5, "5")
         df = _compute_fwd(df, 10, "10")
         df = df.select(keep)
+        df.write_parquet(output_path / pf.name)
+        count += 1
+
+    print(f"Saved {count} stocks to {output_path}")
+    return count
+
+
+# ============== historical stats ==============
+
+def convert_historical_stats(
+    input_dir: str,
+    output_dir: str,
+) -> int:
+    """计算股票过去250/120/60/20天的最高价、最低价、收益率、当前收盘价"""
+    input_path = Path(input_dir)
+    output_path = Path(output_dir)
+    output_path.mkdir(parents=True, exist_ok=True)
+
+    parquet_files = sorted(input_path.glob("*.parquet"))
+    if not parquet_files:
+        raise FileNotFoundError(f"No parquet files found in {input_path}")
+
+    periods = [250, 120, 60, 20]
+
+    count = 0
+    for pf in parquet_files:
+        df = pl.read_parquet(pf).sort("date")
+
+        for p in periods:
+            high_col = pl.col("high").rolling_max(p)
+            low_col = pl.col("low").rolling_min(p)
+            close_col = pl.col("close")
+            close_shift = pl.col("close").shift(p - 1)
+
+            df = df.with_columns([
+                high_col.alias(f"high_{p}"),
+                low_col.alias(f"low_{p}"),
+                ((close_col - close_shift) / close_shift * 100).alias(f"return_{p}"),
+                close_col.alias(f"close_{p}"),
+            ])
+
         df.write_parquet(output_path / pf.name)
         count += 1
 
@@ -492,8 +529,8 @@ def _read_fund_shares(source_path: Path, exchange: str) -> list[pl.DataFrame]:
 
 
 def convert_fund_adjust(
-    input_dir: str = "/mnt/dataset/fund_quote_history",
-    output_dir: str = "/mnt/dataset/fund_quote_adjusted",
+    input_dir: str,
+    output_dir: str,
 ) -> int:
     """前复权：将基金历史价格按最新价格向前调整"""
     input_path = Path(input_dir)
@@ -531,9 +568,9 @@ def convert_fund_adjust(
 
 
 def convert_index_quote(
-    data_path: str = DEFAULT_DATA_PATH,
-    source: str = "finance_sina",
-    output_dir: str = "/mnt/dataset",
+    data_path: str,
+    source: str,
+    output_dir: str,
 ) -> int:
     """将每日指数行情数据转换为每个指数的历史数据"""
     source_path = Path(data_path) / source / "index_quote"
@@ -574,8 +611,8 @@ def convert_index_quote(
 
 
 def convert_fund_shares(
-    data_path: str = "/mnt/readonly_dataset",
-    output_dir: str = "/mnt/dataset",
+    data_path: str,
+    output_dir: str,
 ) -> int:
     """将 SSE + SZSE 基金份额数据转换为每基金历史数据"""
     output_path = Path(output_dir) / "fund_shares_history"
@@ -605,9 +642,9 @@ def convert_fund_shares(
 
 
 def convert_fund_quote(
-    data_path: str = "/mnt/readonly_dataset",
-    source: str = "cninfo",
-    output_dir: str = "/mnt/dataset",
+    data_path: str,
+    source: str,
+    output_dir: str,
 ) -> int:
     """将基金行情数据转换为每基金历史数据"""
     source_path = Path(data_path) / source / "fund_quote"
@@ -653,9 +690,9 @@ def convert_fund_quote(
 
 
 def convert_fund_flow(
-    shares_dir: str = "/mnt/dataset/fund_shares_history",
-    quote_dir: str = "/mnt/dataset/fund_quote_adjusted",
-    output_dir: str = "/mnt/dataset/fund_flow",
+    shares_dir: str,
+    quote_dir: str,
+    output_dir: str,
 ) -> int:
     """结合份额变动和收盘价，估算每日加减仓金额"""
     shares_path = Path(shares_dir)
