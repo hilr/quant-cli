@@ -1,8 +1,12 @@
 """命令行接口"""
 import typer
 from rich.console import Console
+from rich.table import Table
 
-from quant.convert import convert_stock_quote, convert_margin_trade, convert_adjust, convert_margin_trade_daily, convert_ma, convert_boll, convert_fund_shares, convert_fund_quote, convert_fund_adjust, convert_fund_flow, convert_index_quote, convert_index_ma, convert_index_boll, convert_fwd_return
+from quant.convert import (convert_stock_quote, convert_margin_trade, convert_adjust, convert_margin_trade_daily,
+                           convert_ma, convert_boll, convert_fund_shares, convert_fund_quote, convert_fund_adjust,
+                           convert_fund_flow, convert_index_quote, convert_index_ma, convert_index_boll,
+                           convert_fwd_return, convert_historical_stats, convert_filter_volume_spike)
 
 console = Console()
 cli = typer.Typer(name="quant", help="命令行量化工具")
@@ -10,23 +14,25 @@ cli = typer.Typer(name="quant", help="命令行量化工具")
 
 @cli.command()
 def stock_quote(
+    data_path: str = "/mnt/readonly_dataset",
     source: str = "finance_sina",
     output_dir: str = "/mnt/dataset",
 ) -> None:
     """将每日股票行情数据转换为每个股票的历史数据"""
     console.print(f"[cyan]读取 {source} 股票行情数据...[/cyan]")
-    count = convert_stock_quote(source=source, output_dir=output_dir)
+    count = convert_stock_quote(data_path=data_path, source=source, output_dir=output_dir)
     console.print(f"[green]完成! 共 {count} 只股票[/green]")
 
 
 @cli.command()
 def index_quote(
+    data_path: str = "/mnt/readonly_dataset",
     source: str = "finance_sina",
     output_dir: str = "/mnt/dataset",
 ) -> None:
     """将每日指数行情数据转换为每个指数的历史数据"""
     console.print(f"[cyan]读取 {source} 指数行情数据...[/cyan]")
-    count = convert_index_quote(source=source, output_dir=output_dir)
+    count = convert_index_quote(data_path=data_path, source=source, output_dir=output_dir)
     console.print(f"[green]完成! 共 {count} 个指数[/green]")
 
 
@@ -54,12 +60,13 @@ def index_boll(
 
 @cli.command()
 def margin_trade(
+    data_path: str = "/mnt/readonly_dataset",
     source: str = "eastmoney",
     output_dir: str = "/mnt/dataset",
 ) -> None:
     """将每日融资融券数据转换为每个标的的历史数据"""
     console.print(f"[cyan]读取 {source} 融资融券数据...[/cyan]")
-    count = convert_margin_trade(source=source, output_dir=output_dir)
+    count = convert_margin_trade(data_path=data_path, source=source, output_dir=output_dir)
     console.print(f"[green]完成! 共 {count} 只标的[/green]")
 
 
@@ -109,22 +116,24 @@ def boll(
 
 @cli.command()
 def fund_shares(
+    data_path: str = "/mnt/readonly_dataset",
     output_dir: str = "/mnt/dataset",
 ) -> None:
     """将 SSE + SZSE 基金份额数据转换为每基金历史数据"""
     console.print(f"[cyan]处理基金份额...[/cyan]")
-    count = convert_fund_shares(output_dir=output_dir)
+    count = convert_fund_shares(data_path=data_path, output_dir=output_dir)
     console.print(f"[green]完成! 共 {count} 只基金[/green]")
 
 
 @cli.command()
 def fund_quote(
+    data_path: str = "/mnt/readonly_dataset",
     source: str = "cninfo",
     output_dir: str = "/mnt/dataset",
 ) -> None:
     """将基金行情数据转换为每基金历史数据"""
     console.print(f"[cyan]读取 {source} 基金行情数据...[/cyan]")
-    count = convert_fund_quote(source=source, output_dir=output_dir)
+    count = convert_fund_quote(data_path=data_path, source=source, output_dir=output_dir)
     console.print(f"[green]完成! 共 {count} 只基金[/green]")
 
 
@@ -142,7 +151,7 @@ def fund_adjust(
 @cli.command()
 def fund_flow(
     shares_dir: str = "/mnt/dataset/fund_shares_history",
-    quote_dir: str = "/mnt/dataset/fund_quote_history",
+    quote_dir: str = "/mnt/dataset/fund_quote_adjusted",
     output_dir: str = "/mnt/dataset/fund_flow",
 ) -> None:
     """结合份额变动和收盘价，估算每日加减仓金额"""
@@ -156,10 +165,78 @@ def fwd_return(
     input_dir: str = "/mnt/dataset/stock_quote_adjusted",
     output_dir: str = "/mnt/dataset/stock_fwd_return",
 ) -> None:
-    """基于复权后数据计算每日的未来5日收益率特征"""
+    """基于复权后数据计算每日的未来5/10日收益率特征"""
     console.print(f"[cyan]计算前向收益...[/cyan]")
     count = convert_fwd_return(input_dir=input_dir, output_dir=output_dir)
     console.print(f"[green]完成! 共 {count} 只股票[/green]")
+
+
+@cli.command()
+def historical_stats(
+    input_dir: str = "/mnt/dataset/stock_quote_adjusted",
+    output_dir: str = "/mnt/dataset/stock_historical_stats",
+) -> None:
+    """计算股票过去250/120/60/20天的最高价、最低价、收益率、当前收盘价"""
+    console.print(f"[cyan]计算历史统计数据...[/cyan]")
+    count = convert_historical_stats(input_dir=input_dir, output_dir=output_dir)
+    console.print(f"[green]完成! 共 {count} 只股票[/green]")
+
+
+@cli.command()
+def filter_volume_spike(
+    input_dir: str,
+    min_market_cap: float,
+    lookback_days: int = 5,
+    min_ratio: float = 2.0,
+    ma_period: int = 10,
+    min_date: str = None,
+    min_zt_days: int = 0,
+    input_dir_adj: str = None,
+    output_csv: str = None,
+) -> None:
+    """筛选放量股票：市值达标 + 成交额放量 + 涨停天数"""
+    console.print(f"[cyan]筛选放量股票...[/cyan]")
+    results = convert_filter_volume_spike(input_dir=input_dir, min_market_cap=min_market_cap,
+                                          lookback_days=lookback_days, min_ratio=min_ratio,
+                                          ma_period=ma_period, min_date=min_date, min_zt_days=min_zt_days,
+                                          input_dir_adj=input_dir_adj)
+
+    if not results:
+        console.print("[yellow]没有找到符合条件的股票[/yellow]")
+        return
+
+    # 显示表格
+    table = Table(title=f"放量股票筛选结果 (共 {len(results)} 只)")
+    table.add_column("代码", style="cyan")
+    table.add_column("市值", style="yellow")
+    table.add_column("最新日期", style="blue")
+    table.add_column("放量日期", style="red")
+    table.add_column("放量倍数", style="bright_red")
+    table.add_column("涨停天数", style="green")
+
+    for r in results[:100]:
+        table.add_row(
+            r["code"],
+            f"{r['market_cap']/1e8:.0f}亿",
+            r["latest_date"],
+            r["spike_date"],
+            f"{r['spike_ratio']:.2f}x",
+            f"{r['zt_days']}天",
+        )
+
+    console.print(table)
+
+    if len(results) > 100:
+        console.print(f"[dim]... 还有 {len(results) - 100} 只股票未显示[/dim]")
+
+    # 导出 CSV
+    if output_csv:
+        import csv
+        with open(output_csv, "w", newline="", encoding="utf-8") as f:
+            writer = csv.DictWriter(f, fieldnames=results[0].keys())
+            writer.writeheader()
+            writer.writerows(results)
+        console.print(f"[green]结果已导出: {output_csv}[/green]")
 
 
 if __name__ == "__main__":

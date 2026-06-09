@@ -5,6 +5,7 @@ from pathlib import Path
 
 # 默认数据路径
 DEFAULT_DATA_PATH = "/mnt/readonly_dataset"
+OUTPUT_DATA_PATH = "/mnt/dataset"
 
 
 # ============== stock_quote ==============
@@ -19,7 +20,7 @@ STOCK_QUOTE_STR_COLS = ["证券简称"]
 def convert_stock_quote(
     data_path: str = DEFAULT_DATA_PATH,
     source: str = "finance_sina",
-    output_dir: str = "/mnt/dataset",
+    output_dir: str = OUTPUT_DATA_PATH,
 ) -> int:
     """将每日股票行情数据转换为每个股票的历史数据"""
     source_path = Path(data_path) / source / "stock_quote"
@@ -84,7 +85,7 @@ MARGIN_TRADE_COL_MAP = {
 def convert_margin_trade(
     data_path: str = DEFAULT_DATA_PATH,
     source: str = "eastmoney",
-    output_dir: str = "/mnt/dataset",
+    output_dir: str = OUTPUT_DATA_PATH,
 ) -> int:
     """将每日融资融券数据转换为每个标的的历史数据"""
     source_path = Path(data_path) / source / "margin_trade"
@@ -465,6 +466,151 @@ def convert_fwd_return(
     return count
 
 
+# ============== historical stats ==============
+
+def convert_historical_stats(
+    input_dir: str = "/mnt/dataset/stock_quote_adjusted",
+    output_dir: str = "/mnt/dataset/stock_historical_stats",
+) -> int:
+    """计算股票过去250/120/60/20天的最高价、最低价、收益率、当前收盘价"""
+    input_path = Path(input_dir)
+    output_path = Path(output_dir)
+    output_path.mkdir(parents=True, exist_ok=True)
+
+    parquet_files = sorted(input_path.glob("*.parquet"))
+    if not parquet_files:
+        raise FileNotFoundError(f"No parquet files found in {input_path}")
+
+    periods = [250, 120, 60, 20]
+
+    count = 0
+    for pf in parquet_files:
+        df = pl.read_parquet(pf).sort("date")
+
+        for p in periods:
+            high_col = pl.col("high").rolling_max(p)
+            low_col = pl.col("low").rolling_min(p)
+            close_col = pl.col("close")
+            close_shift = pl.col("close").shift(p - 1)
+
+            df = df.with_columns([
+                high_col.alias(f"high_{p}"),
+                low_col.alias(f"low_{p}"),
+                ((close_col - close_shift) / close_shift * 100).alias(f"return_{p}"),
+                close_col.alias(f"close_{p}"),
+            ])
+
+        df.write_parquet(output_path / pf.name)
+        count += 1
+
+    print(f"Saved {count} stocks to {output_path}")
+    return count
+
+
+# ============== volume spike filter ==============
+
+def convert_filter_volume_spike(
+    input_dir: str,
+    min_market_cap: float,
+    lookback_days: int = 5,
+    min_ratio: float = 2.0,
+    ma_period: int = 10,
+    min_date: str = None,
+    min_zt_days: int = 0,
+    input_dir_adj: str = None,
+) -> list[dict]:
+    """筛选满足条件的股票：
+    1. 市值 > min_market_cap
+    2. 最新交易日 >= min_date（可选）
+    3. 过去 lookback_days 个交易日内有成交额 > min_ratio * turnover_ma{ma_period}
+    4. 过去60个交易日涨停天数 >= min_zt_days（可选）
+    """
+    input_path = Path(input_dir)
+    parquet_files = sorted(input_path.glob("*.parquet"))
+    if not parquet_files:
+        raise FileNotFoundError(f"No parquet files found in {input_path}")
+
+    adj_dir = Path(input_dir_adj) if input_dir_adj else Path(str(input_path).replace("ma", "adjusted"))
+    results = []
+    ma_col = f"turnover_ma{ma_period}"
+    required_cols = ["date", "code", "turnover", ma_col, "market_cap"]
+
+    for pf in parquet_files:
+        try:
+            df = pl.read_parquet(pf, columns=required_cols)
+            df_adj = pl.read_parquet(adj_dir / pf.name)
+        except Exception:
+            continue
+
+        df = df.sort("date", descending=False)
+        df_adj = df_adj.sort("date", descending=False)
+
+        if len(df) < 5 or len(df_adj) < 60:
+            continue
+
+        # 获取最新行的市值和日期
+        latest = df.tail(1)
+        if latest["market_cap"][0] < min_market_cap:
+            continue
+
+        # 检查最新交易日期
+        if min_date and latest["date"][0] < min_date:
+            continue
+
+        # 获取最近 lookback_days 行
+        if len(df) < lookback_days:
+            lookback_df = df
+        else:
+            lookback_df = df.slice(-lookback_days)
+
+        # 过滤 null 值并检查放量倍数
+        lookback_df = lookback_df.filter(pl.col(ma_col).is_not_null())
+        if len(lookback_df) == 0:
+            continue
+
+        lookback_df = lookback_df.with_columns([
+            (pl.col("turnover") / pl.col(ma_col)).alias("ratio")
+        ])
+        spike_rows = lookback_df.filter(pl.col("ratio") >= min_ratio)
+
+        # 检查涨停天数
+        if min_zt_days > 0:
+            df_60 = df_adj.tail(60)
+            df_60 = df_60.with_columns([
+                ((pl.col("close") - pl.col("prev_close")) / pl.col("prev_close") * 100).alias("pct_change")
+            ])
+            zt_10 = df_60.filter(pl.col("pct_change") >= 9.8)
+            zt_20 = df_60.filter(pl.col("pct_change") >= 19.8)
+            zt_days = len(zt_10) + len(zt_20)
+            if zt_days < min_zt_days:
+                continue
+        else:
+            zt_days = 0
+
+        if len(spike_rows) > 0:
+            # 获取放量最大的那一行
+            spike_row = spike_rows.sort(pl.col("turnover"), descending=True).row(0, named=True)
+            latest_row = latest.row(0, named=True)
+
+            results.append({
+                "code": latest_row["code"],
+                "name": "",
+                "market_cap": latest_row["market_cap"],
+                "latest_date": latest_row["date"],
+                "turnover": latest_row["turnover"],
+                f"turnover_ma{ma_period}": latest_row[ma_col],
+                "spike_date": spike_row["date"],
+                "spike_turnover": spike_row["turnover"],
+                f"spike_ma{ma_period}": spike_row[ma_col],
+                "spike_ratio": spike_row["ratio"],
+                "zt_days": zt_days,
+            })
+
+    # 按市值降序排序
+    results.sort(key=lambda x: x["market_cap"], reverse=True)
+    return results
+
+
 # ============== fund ==============
 
 def _read_fund_shares(source_path: Path, exchange: str) -> list[pl.DataFrame]:
@@ -533,7 +679,7 @@ def convert_fund_adjust(
 def convert_index_quote(
     data_path: str = DEFAULT_DATA_PATH,
     source: str = "finance_sina",
-    output_dir: str = "/mnt/dataset",
+    output_dir: str = OUTPUT_DATA_PATH,
 ) -> int:
     """将每日指数行情数据转换为每个指数的历史数据"""
     source_path = Path(data_path) / source / "index_quote"
@@ -574,8 +720,8 @@ def convert_index_quote(
 
 
 def convert_fund_shares(
-    data_path: str = "/mnt/readonly_dataset",
-    output_dir: str = "/mnt/dataset",
+    data_path: str = DEFAULT_DATA_PATH,
+    output_dir: str = OUTPUT_DATA_PATH,
 ) -> int:
     """将 SSE + SZSE 基金份额数据转换为每基金历史数据"""
     output_path = Path(output_dir) / "fund_shares_history"
@@ -605,9 +751,9 @@ def convert_fund_shares(
 
 
 def convert_fund_quote(
-    data_path: str = "/mnt/readonly_dataset",
+    data_path: str = DEFAULT_DATA_PATH,
     source: str = "cninfo",
-    output_dir: str = "/mnt/dataset",
+    output_dir: str = OUTPUT_DATA_PATH,
 ) -> int:
     """将基金行情数据转换为每基金历史数据"""
     source_path = Path(data_path) / source / "fund_quote"
