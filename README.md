@@ -6,8 +6,8 @@
 
 | 类型 | 路径 |
 |------|------|
-| 只读原始数据 | `/mnt/readonly_datasets` |
-| 生成数据集 | `/mnt/datasets` |
+| 只读原始数据 | `/mnt/readonly_dataset` |
+| 生成数据集 | `/mnt/dataset` |
 
 所有路径参数必须作为命令行参数传入，不可硬编码。
 
@@ -298,17 +298,64 @@
 
 ---
 
+## 筛选功能
+
+### filter_volume_spike — 放量股票筛选
+
+| 项 | 内容 |
+|---|------|
+| 命令 | `uv run python -m quant.cli filter-volume-spike <input_dir> <min_market_cap> [options]` |
+| 输入 | `{input_dir}/{code}.parquet`（stock_quote_ma） |
+| 输出 | 控制台表格（可选 CSV 文件） |
+| 筛选条件 | 市值 > min_market_cap，过去 N 日内有成交额 > M 倍 20日均线 |
+
+**参数：**
+| 参数 | 说明 | 默认值 |
+|------|------|--------|
+| input_dir | 输入目录（stock_quote_ma） | 必填 |
+| min_market_cap | 最小市值（单位：元） | 必填（100亿=10000000000） |
+| lookback-days | 回看交易日数 | 10 |
+| volume-multiplier | 放量倍数 | 2.0 |
+| output-csv | 输出 CSV 文件路径 | None（仅控制台显示） |
+
+**使用示例：**
+```bash
+# 筛选市值100亿以上，过去10日内有2倍放量的股票
+uv run python -m quant.cli filter-volume-spike /mnt/dataset/stock_quote_ma 10000000000
+
+# 自定义参数
+uv run python -m quant.cli filter-volume-spike /mnt/dataset/stock_quote_ma 50000000000 --lookback-days 15 --volume-multiplier 3.0
+
+# 导出结果
+uv run python -m quant.cli filter-volume-spike /mnt/dataset/stock_quote_ma 10000000000 --output-csv /tmp/volume_spike.csv
+```
+
+**输出示例：**
+```
+╒═════════╤══════════╤════════════╤════════════╤═════════════╤══════════════╤═══════════════╕
+│ 代码    │ 名称     │ 市值       │ 最新日期   │ 成交额     │ 20日均线   │ 放量日期    │ 放量倍数   │
+╞═════════╪══════════╪════════════╪════════════╪═════════════╪══════════════╪═══════════════╡
+│ 000001  │ 平安银行  │ 250亿      │ 2024-06-07 │ 500M        │ 200M        │ 2024-06-03   │ 2.5x       │
+└─────────┴──────────┴─────────────┴────────────┴─────────────┴──────────────┴─────────────┘
+
+放量股票筛选结果 (共 156 只)
+```
+
+**注意：** 数据集只包含交易日数据，`lookback-days` 参数使用交易日数而非自然日。14个自然日约等于10个交易日。
+
+---
+
 ## 数据流全景
 
 ```
 ┌─────────────────────────────────────────────────────────────────┐
 │                        只读原始数据                              │
-│  /mnt/readonly_datasets/finance_sina/stock_quote/              │
-│  /mnt/readonly_datasets/finance_sina/index_quote/              │
-│  /mnt/readonly_datasets/eastmoney/margin_trade/                │
-│  /mnt/readonly_datasets/cninfo/fund_quote/                     │
-│  /mnt/readonly_datasets/exchange_sse/fund_shares/              │
-│  /mnt/readonly_datasets/exchange_szse/fund_shares/             │
+│  /mnt/readonly_dataset/finance_sina/stock_quote/              │
+│  /mnt/readonly_dataset/finance_sina/index_quote/              │
+│  /mnt/readonly_dataset/eastmoney/margin_trade/                │
+│  /mnt/readonly_dataset/cninfo/fund_quote/                     │
+│  /mnt/readonly_dataset/exchange_sse/fund_shares/              │
+│  /mnt/readonly_dataset/exchange_szse/fund_shares/             │
 └─────────────────────────────────────────────────────────────────┘
                               ↓
 ┌─────────────────────────────────────────────────────────────────┐
