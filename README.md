@@ -23,6 +23,46 @@
 
 ---
 
+## 刷新全部数据集
+
+### refresh — 按依赖顺序刷新
+
+| 项 | 内容 |
+|---|------|
+| 命令 | `uv run python -m quant.cli refresh [data_path] [output_dir] [options]` |
+| 逻辑 | 按4阶段依赖图自动执行，同阶段内并行 |
+
+**参数：**
+| 参数 | 说明 | 默认值 |
+|------|------|--------|
+| data_path | 原始数据目录 | /mnt/readonly_dataset |
+| output_dir | 输出目录 | /mnt/dataset |
+| workers | 并行进程数 | 2 |
+
+**执行阶段：**
+| 阶段 | 内容 | 并行数 |
+|------|------|--------|
+| Stage 1 | 原始→历史（stock_quote, margin_trade, fund_shares, fund_quote, index_quote） | 5 |
+| Stage 2 | 前复权（stock_adjusted, fund_adjusted） | 2 |
+| Stage 3 | 衍生指标（ma, boll, historical_stats, fwd_return, index_ma, index_boll） | 6 |
+| Stage 4 | 聚合（margin_trade_daily, fund_flow） | 2 |
+
+**使用示例：**
+```bash
+# 默认 2 进程
+uv run python -m quant.cli refresh
+
+# 4 进程并行
+uv run python -m quant.cli refresh /mnt/readonly_dataset /mnt/dataset --workers 4
+
+# 串行执行
+uv run python -m quant.cli refresh --workers 1
+```
+
+**注意：** 使用 `ProcessPoolExecutor` 实现多进程并行，`workers` 控制每个阶段内的最大并发进程数。
+
+---
+
 ## 数据集
 
 ### stock_quote_history — 股票行情历史

@@ -7,6 +7,7 @@ from quant.convert import (convert_stock_quote, convert_margin_trade, convert_ad
                            convert_ma, convert_boll, convert_fund_shares, convert_fund_quote, convert_fund_adjust,
                            convert_fund_flow, convert_index_quote, convert_index_ma, convert_index_boll,
                            convert_fwd_return, convert_historical_stats, convert_filter_volume_spike)
+from quant.pipeline import build_stages, run_pipeline
 
 console = Console()
 cli = typer.Typer(name="quant", help="命令行量化工具")
@@ -237,6 +238,19 @@ def filter_volume_spike(
             writer.writeheader()
             writer.writerows(results)
         console.print(f"[green]结果已导出: {output_csv}[/green]")
+
+
+@cli.command()
+def refresh(
+    data_path: str = "/mnt/readonly_dataset",
+    output_dir: str = "/mnt/dataset",
+    workers: int = 2,
+) -> None:
+    """按依赖顺序刷新全部数据集，同层并行"""
+    console.print(f"[cyan]刷新全部数据集 (workers={workers})...[/cyan]")
+    stages = build_stages(data_path=data_path, output_dir=output_dir)
+    run_pipeline(stages, workers=workers, console=console)
+    console.print("[green]全部数据集刷新完成![/green]")
 
 
 if __name__ == "__main__":
