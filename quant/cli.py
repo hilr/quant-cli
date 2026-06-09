@@ -1,8 +1,12 @@
 """命令行接口"""
 import typer
 from rich.console import Console
+from rich.table import Table
 
-from quant.convert import convert_stock_quote, convert_margin_trade, convert_adjust, convert_margin_trade_daily, convert_ma, convert_boll, convert_fund_shares, convert_fund_quote, convert_fund_adjust, convert_fund_flow, convert_index_quote, convert_index_ma, convert_index_boll, convert_fwd_return, convert_historical_stats
+from quant.convert import (convert_stock_quote, convert_margin_trade, convert_adjust, convert_margin_trade_daily,
+                           convert_ma, convert_boll, convert_fund_shares, convert_fund_quote, convert_fund_adjust,
+                           convert_fund_flow, convert_index_quote, convert_index_ma, convert_index_boll,
+                           convert_fwd_return, convert_historical_stats, convert_filter_volume_spike)
 
 console = Console()
 cli = typer.Typer(name="quant", help="命令行量化工具")
@@ -10,9 +14,9 @@ cli = typer.Typer(name="quant", help="命令行量化工具")
 
 @cli.command()
 def stock_quote(
-    data_path: str,
-    source: str,
-    output_dir: str,
+    data_path: str = "/mnt/readonly_datasets",
+    source: str = "finance_sina",
+    output_dir: str = "/mnt/datasets",
 ) -> None:
     """将每日股票行情数据转换为每个股票的历史数据"""
     console.print(f"[cyan]读取 {source} 股票行情数据...[/cyan]")
@@ -22,9 +26,9 @@ def stock_quote(
 
 @cli.command()
 def index_quote(
-    data_path: str,
-    source: str,
-    output_dir: str,
+    data_path: str = "/mnt/readonly_datasets",
+    source: str = "finance_sina",
+    output_dir: str = "/mnt/datasets",
 ) -> None:
     """将每日指数行情数据转换为每个指数的历史数据"""
     console.print(f"[cyan]读取 {source} 指数行情数据...[/cyan]")
@@ -34,8 +38,8 @@ def index_quote(
 
 @cli.command()
 def index_ma(
-    input_dir: str,
-    output_dir: str,
+    input_dir: str = "/mnt/datasets/index_quote_history",
+    output_dir: str = "/mnt/datasets/index_quote_ma",
 ) -> None:
     """基于指数行情计算 close 和 turnover 的滚动均线"""
     console.print(f"[cyan]计算指数均线...[/cyan]")
@@ -45,8 +49,8 @@ def index_ma(
 
 @cli.command()
 def index_boll(
-    input_dir: str,
-    output_dir: str,
+    input_dir: str = "/mnt/datasets/index_quote_history",
+    output_dir: str = "/mnt/datasets/index_quote_boll",
 ) -> None:
     """基于指数行情计算布林带"""
     console.print(f"[cyan]计算指数布林带...[/cyan]")
@@ -56,9 +60,9 @@ def index_boll(
 
 @cli.command()
 def margin_trade(
-    data_path: str,
-    source: str,
-    output_dir: str,
+    data_path: str = "/mnt/readonly_datasets",
+    source: str = "eastmoney",
+    output_dir: str = "/mnt/datasets",
 ) -> None:
     """将每日融资融券数据转换为每个标的的历史数据"""
     console.print(f"[cyan]读取 {source} 融资融券数据...[/cyan]")
@@ -68,8 +72,8 @@ def margin_trade(
 
 @cli.command()
 def adjust(
-    input_dir: str,
-    output_dir: str,
+    input_dir: str = "/mnt/datasets/stock_quote_history",
+    output_dir: str = "/mnt/datasets/stock_quote_adjusted",
 ) -> None:
     """前复权：将股票历史价格按最新价格向前调整"""
     console.print(f"[cyan]前复权计算...[/cyan]")
@@ -79,8 +83,8 @@ def adjust(
 
 @cli.command()
 def margin_trade_daily(
-    input_dir: str,
-    output_dir: str,
+    input_dir: str = "/mnt/datasets/margin_trade_history",
+    output_dir: str = "/mnt/datasets/margin_trade_daily",
 ) -> None:
     """从个股文件生成每日融资融券净变化汇总（最新日期往前，存在则跳过）"""
     console.print(f"[cyan]生成每日净变化文件...[/cyan]")
@@ -90,8 +94,8 @@ def margin_trade_daily(
 
 @cli.command()
 def ma(
-    input_dir: str,
-    output_dir: str,
+    input_dir: str = "/mnt/datasets/stock_quote_adjusted",
+    output_dir: str = "/mnt/datasets/stock_quote_ma",
 ) -> None:
     """基于前复权数据计算 close 的滚动均线（ma5/10/20/60/120/250）"""
     console.print(f"[cyan]计算均线...[/cyan]")
@@ -101,8 +105,8 @@ def ma(
 
 @cli.command()
 def boll(
-    input_dir: str,
-    output_dir: str,
+    input_dir: str = "/mnt/datasets/stock_quote_adjusted",
+    output_dir: str = "/mnt/datasets/stock_quote_boll",
 ) -> None:
     """基于前复权数据计算布林带（period=20/60, k=2）"""
     console.print(f"[cyan]计算布林带...[/cyan]")
@@ -112,8 +116,8 @@ def boll(
 
 @cli.command()
 def fund_shares(
-    data_path: str,
-    output_dir: str,
+    data_path: str = "/mnt/readonly_datasets",
+    output_dir: str = "/mnt/datasets",
 ) -> None:
     """将 SSE + SZSE 基金份额数据转换为每基金历史数据"""
     console.print(f"[cyan]处理基金份额...[/cyan]")
@@ -123,9 +127,9 @@ def fund_shares(
 
 @cli.command()
 def fund_quote(
-    data_path: str,
-    source: str,
-    output_dir: str,
+    data_path: str = "/mnt/readonly_datasets",
+    source: str = "cninfo",
+    output_dir: str = "/mnt/datasets",
 ) -> None:
     """将基金行情数据转换为每基金历史数据"""
     console.print(f"[cyan]读取 {source} 基金行情数据...[/cyan]")
@@ -135,8 +139,8 @@ def fund_quote(
 
 @cli.command()
 def fund_adjust(
-    input_dir: str,
-    output_dir: str,
+    input_dir: str = "/mnt/datasets/fund_quote_history",
+    output_dir: str = "/mnt/datasets/fund_quote_adjusted",
 ) -> None:
     """前复权：将基金历史价格按最新价格向前调整"""
     console.print(f"[cyan]基金前复权计算...[/cyan]")
@@ -146,9 +150,9 @@ def fund_adjust(
 
 @cli.command()
 def fund_flow(
-    shares_dir: str,
-    quote_dir: str,
-    output_dir: str,
+    shares_dir: str = "/mnt/datasets/fund_shares_history",
+    quote_dir: str = "/mnt/datasets/fund_quote_adjusted",
+    output_dir: str = "/mnt/datasets/fund_flow",
 ) -> None:
     """结合份额变动和收盘价，估算每日加减仓金额"""
     console.print(f"[cyan]计算基金资金流...[/cyan]")
@@ -158,8 +162,8 @@ def fund_flow(
 
 @cli.command()
 def fwd_return(
-    input_dir: str,
-    output_dir: str,
+    input_dir: str = "/mnt/datasets/stock_quote_adjusted",
+    output_dir: str = "/mnt/datasets/stock_fwd_return",
 ) -> None:
     """基于复权后数据计算每日的未来5/10日收益率特征"""
     console.print(f"[cyan]计算前向收益...[/cyan]")
@@ -169,13 +173,70 @@ def fwd_return(
 
 @cli.command()
 def historical_stats(
-    input_dir: str,
-    output_dir: str,
+    input_dir: str = "/mnt/datasets/stock_quote_adjusted",
+    output_dir: str = "/mnt/datasets/stock_historical_stats",
 ) -> None:
     """计算股票过去250/120/60/20天的最高价、最低价、收益率、当前收盘价"""
     console.print(f"[cyan]计算历史统计数据...[/cyan]")
     count = convert_historical_stats(input_dir=input_dir, output_dir=output_dir)
     console.print(f"[green]完成! 共 {count} 只股票[/green]")
+
+
+@cli.command()
+def filter_volume_spike(
+    input_dir: str,
+    min_market_cap: float,
+    lookback_days: int = 5,
+    min_ratio: float = 2.0,
+    ma_period: int = 10,
+    min_date: str = None,
+    min_zt_days: int = 0,
+    input_dir_adj: str = None,
+    output_csv: str = None,
+) -> None:
+    """筛选放量股票：市值达标 + 成交额放量 + 涨停天数"""
+    console.print(f"[cyan]筛选放量股票...[/cyan]")
+    results = convert_filter_volume_spike(input_dir=input_dir, min_market_cap=min_market_cap,
+                                          lookback_days=lookback_days, min_ratio=min_ratio,
+                                          ma_period=ma_period, min_date=min_date, min_zt_days=min_zt_days,
+                                          input_dir_adj=input_dir_adj)
+
+    if not results:
+        console.print("[yellow]没有找到符合条件的股票[/yellow]")
+        return
+
+    # 显示表格
+    table = Table(title=f"放量股票筛选结果 (共 {len(results)} 只)")
+    table.add_column("代码", style="cyan")
+    table.add_column("市值", style="yellow")
+    table.add_column("最新日期", style="blue")
+    table.add_column("放量日期", style="red")
+    table.add_column("放量倍数", style="bright_red")
+    table.add_column("涨停天数", style="green")
+
+    for r in results[:100]:
+        table.add_row(
+            r["code"],
+            f"{r['market_cap']/1e8:.0f}亿",
+            r["latest_date"],
+            r["spike_date"],
+            f"{r['spike_ratio']:.2f}x",
+            f"{r['zt_days']}天",
+        )
+
+    console.print(table)
+
+    if len(results) > 100:
+        console.print(f"[dim]... 还有 {len(results) - 100} 只股票未显示[/dim]")
+
+    # 导出 CSV
+    if output_csv:
+        import csv
+        with open(output_csv, "w", newline="", encoding="utf-8") as f:
+            writer = csv.DictWriter(f, fieldnames=results[0].keys())
+            writer.writeheader()
+            writer.writerows(results)
+        console.print(f"[green]结果已导出: {output_csv}[/green]")
 
 
 if __name__ == "__main__":
