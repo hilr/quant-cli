@@ -830,3 +830,187 @@ def convert_fund_flow(
 
     print(f"Saved {count} funds to {output_path}")
     return count
+
+
+# ============== fund_hs300_correlation ==============
+
+BENCHMARK_CODE = "510300"
+CORR_WINDOWS = [5, 10, 20]
+
+# 排除的基金类型关键词
+_EXCLUDE_KEYWORDS = [
+    # 固收/货币
+    "债", "货币", "短融", "日利", "添益", "城投", "企债", "金利", "快线",
+    "财富宝", "添利", "国开", "快钱", "天金",
+    # 海外
+    "纳斯达克", "纳指", "标普", "恒生", "恒指", "港股", "港美", "香港",
+    "HK", "H股", "中概", "美股", "海外", "日经", "德国", "法国", "英国",
+    "印度", "东南亚", "日本", "越南", "韩国", "中韩", "新加坡", "欧洲",
+    "金砖", "东盟", "亚太", "全球", "QDII", "沪港深", "沪港通",
+    "REIT", "reits",
+    # 其他非权益
+    "石油LOF", "石油基金", "港医", "港高",
+    # REITs (508xxx 代码)
+    "安居", "高速REIT", "地产租住", "亦庄", "科投", "清能",
+    "REITs", "产业园", "仓储", "物流REIT", "高速", "公路REIT",
+    "有巢", "两江", "金隅", "九州通",
+    # 商品
+    "原油", "黄金", "白银", "豆粕", "铜", "铝", "油气", "有色ETF",
+]
+
+# REITs 代码前缀
+_REIT_CODE_PREFIXES = ("508", "506")
+
+# 关键词 → 基金类型，按优先级排序（长关键词优先匹配）
+_FUND_TYPE_RULES = [
+    ("沪深港300", "沪深港300"),
+    ("AH300", "AH300"),
+    ("HGS300", "HGS300"),
+    ("创业板", "创业板"),
+    ("现金流", "300现金流"),
+    ("等权", "300等权"),
+    ("国证2000", "国证2000"),
+    ("沪深300", "沪深300"),
+    ("HS300", "沪深300"),
+    ("300ETF", "沪深300"),
+    ("300LOF", "沪深300LOF"),
+    ("沪深300LOF", "沪深300LOF"),
+    ("300增强", "300增强"),
+    ("300指增", "300增强"),
+    ("300成长", "300成长"),
+    ("300价值", "300价值"),
+    ("300红利", "300红利"),
+    ("300ESG", "300ESG"),
+    ("成长", "成长"),
+    ("价值", "价值"),
+    ("增强", "增强"),
+    ("指增", "增强"),
+    ("红利", "红利"),
+    ("ESG", "ESG"),
+    ("LOF", "LOF"),
+    ("证券", "证券"),
+    ("银行", "银行"),
+    ("军工", "军工"),
+    ("医药", "医药"),
+    ("消费", "消费"),
+    ("科技", "科技"),
+    ("芯片", "芯片"),
+    ("半导体", "半导体"),
+    ("新能源", "新能源"),
+    ("光伏", "光伏"),
+    ("汽车", "汽车"),
+    ("房地产", "房地产"),
+    ("有色", "有色"),
+    ("煤炭", "煤炭"),
+    ("钢铁", "钢铁"),
+    ("石油", "石油"),
+    ("养殖", "养殖"),
+    ("粮食", "粮食"),
+    ("科创", "科创"),
+    ("50ETF", "上证50"),
+    ("500ETF", "中证500"),
+    ("1000ETF", "中证1000"),
+    ("2000", "中证2000"),
+    ("A500", "中证A500"),
+    ("A50", "中证A50"),
+]
+
+
+def _fund_type(name: str) -> str:
+    """按关键词提取基金类型"""
+    for keyword, type_name in _FUND_TYPE_RULES:
+        if keyword in name:
+            return type_name
+    return name  # 无法分类的基金，用完整名称作为类型（不会去重）
+
+
+def convert_fund_hs300_correlation(
+    input_dir: str,
+    output_dir: str,
+) -> int:
+    """排除债券/货币/国外指数基金，同类型取成交额最大，计算与510300的滚动相关性（5/10/20日窗口）"""
+    input_path = Path(input_dir)
+    output_path = Path(output_dir)
+    output_path.mkdir(parents=True, exist_ok=True)
+    for f in output_path.glob("*.parquet"):
+        f.unlink()
+
+    # 1. 加载 510300 基准收益率
+    benchmark_file = input_path / f"{BENCHMARK_CODE}.parquet"
+    if not benchmark_file.exists():
+        print(f"Benchmark fund {BENCHMARK_CODE} not found in {input_path}")
+        return 0
+
+    benchmark = (
+        pl.read_parquet(benchmark_file, columns=["date", "close"])
+        .sort("date")
+        .with_columns((pl.col("close") / pl.col("close").shift(1) - 1).alias("bm_return"))
+        .select(["date", "bm_return"])
+    )
+
+    # 2. 筛选基金：排除债券/货币/国外指数，排除 510300 自身，日期须与基准一致，至少20个交易日
+    bm_latest_date = benchmark.filter(pl.col("bm_return").is_not_null())["date"][-1]
+    min_days = max(CORR_WINDOWS)
+    fund_info = []
+    for pf in input_path.glob("*.parquet"):
+        code = pf.stem
+        if code == BENCHMARK_CODE:
+            continue
+        try:
+            df_head = pl.read_parquet(pf, columns=["name", "date", "turnover"])
+            name = df_head["name"][0]
+            if any(kw in name for kw in _EXCLUDE_KEYWORDS):
+                continue
+            if code.startswith(_REIT_CODE_PREFIXES):
+                continue
+            latest_date = df_head["date"][-1]
+            if latest_date != bm_latest_date:
+                continue
+            if len(df_head) < min_days:
+                continue
+            latest_turnover = df_head.sort("date").tail(1)["turnover"][0]
+            fund_info.append({
+                "code": code, "name": name,
+                "turnover": latest_turnover, "type": _fund_type(name),
+            })
+        except Exception:
+            pass
+
+    # 3. 同类型只取成交额最大的
+    fund_df = pl.DataFrame(fund_info, orient="row")
+    deduped = (
+        fund_df.sort("turnover", descending=True)
+        .group_by("type", maintain_order=True)
+        .agg(pl.all().first())
+    )
+    target_codes = deduped["code"].to_list()
+
+    for row in deduped.iter_rows(named=True):
+        print(f"  {row['type']:12s} → {row['code']} {row['name']} (turnover={row['turnover']:.0f})")
+
+    # 4. 逐基金计算滚动相关性
+    count = 0
+    for code in sorted(target_codes):
+        df = (
+            pl.read_parquet(input_path / f"{code}.parquet", columns=["date", "close"])
+            .sort("date")
+            .with_columns((pl.col("close") / pl.col("close").shift(1) - 1).alias("return"))
+        )
+
+        joined = df.join(benchmark, on="date", how="inner")
+
+        corr_exprs = []
+        for w in CORR_WINDOWS:
+            corr_exprs.append(
+                pl.rolling_corr("return", "bm_return", window_size=w).alias(f"corr_{w}")
+            )
+
+        result = joined.with_columns(corr_exprs).select(
+            ["date", "return"] + [f"corr_{w}" for w in CORR_WINDOWS]
+        )
+
+        result.write_parquet(output_path / f"{code}.parquet")
+        count += 1
+
+    print(f"Saved {count} funds to {output_path}")
+    return count
