@@ -472,7 +472,7 @@ def convert_historical_stats(
     input_dir: str = "/mnt/dataset/stock_quote_adjusted",
     output_dir: str = "/mnt/dataset/stock_historical_stats",
 ) -> int:
-    """计算股票过去250/120/60/20天的最高价、最低价、收益率、当前收盘价"""
+    """计算股票过去1000/750/500/250/120/60/20天的最高价、最低价、收益率、当前收盘价"""
     input_path = Path(input_dir)
     output_path = Path(output_dir)
     output_path.mkdir(parents=True, exist_ok=True)
@@ -481,7 +481,7 @@ def convert_historical_stats(
     if not parquet_files:
         raise FileNotFoundError(f"No parquet files found in {input_path}")
 
-    periods = [250, 120, 60, 20]
+    periods = [1000, 750, 500, 250, 120, 60, 20]
 
     count = 0
     for pf in parquet_files:
