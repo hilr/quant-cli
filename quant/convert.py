@@ -846,6 +846,8 @@ def convert_fund_hs300_correlation(
     input_path = Path(input_dir)
     output_path = Path(output_dir)
     output_path.mkdir(parents=True, exist_ok=True)
+    for f in output_path.glob("*.parquet"):
+        f.unlink()
 
     # 1. 加载 510300 基准收益率
     benchmark_file = input_path / f"{BENCHMARK_CODE}.parquet"
@@ -860,16 +862,22 @@ def convert_fund_hs300_correlation(
         .select(["date", "bm_return"])
     )
 
-    # 2. 筛选名称含"300"的基金（排除 510300 自身）
+    # 2. 筛选名称含"300"的基金（排除 510300 自身），且最新日期与基准一致
+    bm_latest_date = benchmark.filter(pl.col("bm_return").is_not_null())["date"][-1]
     target_codes = []
     for pf in input_path.glob("*.parquet"):
         code = pf.stem
         if code == BENCHMARK_CODE:
             continue
         try:
-            name = pl.read_parquet(pf, columns=["name"])["name"][0]
-            if "300" in name:
-                target_codes.append(code)
+            df_head = pl.read_parquet(pf, columns=["name", "date"])
+            name = df_head["name"][0]
+            if "300" not in name:
+                continue
+            latest_date = df_head["date"][-1]
+            if latest_date != bm_latest_date:
+                continue
+            target_codes.append(code)
         except Exception:
             pass
 
