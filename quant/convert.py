@@ -837,12 +837,40 @@ def convert_fund_flow(
 BENCHMARK_CODE = "510300"
 CORR_WINDOWS = [5, 10, 20]
 
+# 关键词 → 基金类型，按优先级排序（长关键词优先匹配）
+_FUND_TYPE_RULES = [
+    ("沪深港", "沪深港300"),
+    ("HGS", "HGS300"),
+    ("AH", "AH300"),
+    ("创业板", "创业板300"),
+    ("现金流", "300现金流"),
+    ("等权", "300等权"),
+    ("国证2000", "国证2000"),
+    ("成长", "300成长"),
+    ("价值", "300价值"),
+    ("增强", "300增强"),
+    ("指增", "300增强"),
+    ("ETF增", "300增强"),
+    ("红利", "300红利"),
+    ("ESG", "300ESG"),
+    ("LOF", "300LOF"),
+    ("民企", "300民企"),
+]
+
+
+def _fund_type(name: str) -> str:
+    """按关键词提取基金类型"""
+    for keyword, type_name in _FUND_TYPE_RULES:
+        if keyword in name:
+            return type_name
+    return "沪深300"
+
 
 def convert_fund_hs300_correlation(
     input_dir: str,
     output_dir: str,
 ) -> int:
-    """筛选沪深300关联基金，计算日收益率及与510300的滚动相关性（5/10/20日窗口）"""
+    """筛选沪深300关联基金，同类型取成交额最大，计算与510300的滚动相关性（5/10/20日窗口）"""
     input_path = Path(input_dir)
     output_path = Path(output_dir)
     output_path.mkdir(parents=True, exist_ok=True)
@@ -864,24 +892,40 @@ def convert_fund_hs300_correlation(
 
     # 2. 筛选名称含"300"的基金（排除 510300 自身），且最新日期与基准一致
     bm_latest_date = benchmark.filter(pl.col("bm_return").is_not_null())["date"][-1]
-    target_codes = []
+    fund_info = []
     for pf in input_path.glob("*.parquet"):
         code = pf.stem
         if code == BENCHMARK_CODE:
             continue
         try:
-            df_head = pl.read_parquet(pf, columns=["name", "date"])
+            df_head = pl.read_parquet(pf, columns=["name", "date", "turnover"])
             name = df_head["name"][0]
             if "300" not in name:
                 continue
             latest_date = df_head["date"][-1]
             if latest_date != bm_latest_date:
                 continue
-            target_codes.append(code)
+            latest_turnover = df_head.sort("date").tail(1)["turnover"][0]
+            fund_info.append({
+                "code": code, "name": name,
+                "turnover": latest_turnover, "type": _fund_type(name),
+            })
         except Exception:
             pass
 
-    # 3. 逐基金计算滚动相关性
+    # 3. 同类型只取成交额最大的
+    fund_df = pl.DataFrame(fund_info, orient="row")
+    deduped = (
+        fund_df.sort("turnover", descending=True)
+        .group_by("type", maintain_order=True)
+        .agg(pl.all().first())
+    )
+    target_codes = deduped["code"].to_list()
+
+    for row in deduped.iter_rows(named=True):
+        print(f"  {row['type']:12s} → {row['code']} {row['name']} (turnover={row['turnover']:.0f})")
+
+    # 4. 逐基金计算滚动相关性
     count = 0
     for code in sorted(target_codes):
         df = (
@@ -892,7 +936,6 @@ def convert_fund_hs300_correlation(
 
         joined = df.join(benchmark, on="date", how="inner")
 
-        # 计算各窗口滚动相关系数
         corr_exprs = []
         for w in CORR_WINDOWS:
             corr_exprs.append(
