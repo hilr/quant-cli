@@ -830,3 +830,73 @@ def convert_fund_flow(
 
     print(f"Saved {count} funds to {output_path}")
     return count
+
+
+# ============== fund_hs300_correlation ==============
+
+BENCHMARK_CODE = "510300"
+CORR_WINDOWS = [5, 10, 20]
+
+
+def convert_fund_hs300_correlation(
+    input_dir: str,
+    output_dir: str,
+) -> int:
+    """筛选沪深300关联基金，计算日收益率及与510300的滚动相关性（5/10/20日窗口）"""
+    input_path = Path(input_dir)
+    output_path = Path(output_dir)
+    output_path.mkdir(parents=True, exist_ok=True)
+
+    # 1. 加载 510300 基准收益率
+    benchmark_file = input_path / f"{BENCHMARK_CODE}.parquet"
+    if not benchmark_file.exists():
+        print(f"Benchmark fund {BENCHMARK_CODE} not found in {input_path}")
+        return 0
+
+    benchmark = (
+        pl.read_parquet(benchmark_file, columns=["date", "close"])
+        .sort("date")
+        .with_columns((pl.col("close") / pl.col("close").shift(1) - 1).alias("bm_return"))
+        .select(["date", "bm_return"])
+    )
+
+    # 2. 筛选名称含"300"的基金（排除 510300 自身）
+    target_codes = []
+    for pf in input_path.glob("*.parquet"):
+        code = pf.stem
+        if code == BENCHMARK_CODE:
+            continue
+        try:
+            name = pl.read_parquet(pf, columns=["name"])["name"][0]
+            if "300" in name:
+                target_codes.append(code)
+        except Exception:
+            pass
+
+    # 3. 逐基金计算滚动相关性
+    count = 0
+    for code in sorted(target_codes):
+        df = (
+            pl.read_parquet(input_path / f"{code}.parquet", columns=["date", "close"])
+            .sort("date")
+            .with_columns((pl.col("close") / pl.col("close").shift(1) - 1).alias("return"))
+        )
+
+        joined = df.join(benchmark, on="date", how="inner")
+
+        # 计算各窗口滚动相关系数
+        corr_exprs = []
+        for w in CORR_WINDOWS:
+            corr_exprs.append(
+                pl.rolling_corr("return", "bm_return", window_size=w).alias(f"corr_{w}")
+            )
+
+        result = joined.with_columns(corr_exprs).select(
+            ["date", "return"] + [f"corr_{w}" for w in CORR_WINDOWS]
+        )
+
+        result.write_parquet(output_path / f"{code}.parquet")
+        count += 1
+
+    print(f"Saved {count} funds to {output_path}")
+    return count

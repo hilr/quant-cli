@@ -6,7 +6,8 @@ from rich.table import Table
 from quant.convert import (convert_stock_quote, convert_margin_trade, convert_adjust, convert_margin_trade_daily,
                            convert_ma, convert_boll, convert_fund_shares, convert_fund_quote, convert_fund_adjust,
                            convert_fund_flow, convert_index_quote, convert_index_ma, convert_index_boll,
-                           convert_fwd_return, convert_historical_stats, convert_filter_volume_spike)
+                           convert_fwd_return, convert_historical_stats, convert_filter_volume_spike,
+                           convert_fund_hs300_correlation)
 
 console = Console()
 cli = typer.Typer(name="quant", help="命令行量化工具")
@@ -157,6 +158,17 @@ def fund_flow(
     """结合份额变动和收盘价，估算每日加减仓金额"""
     console.print(f"[cyan]计算基金资金流...[/cyan]")
     count = convert_fund_flow(shares_dir=shares_dir, quote_dir=quote_dir, output_dir=output_dir)
+    console.print(f"[green]完成! 共 {count} 只基金[/green]")
+
+
+@cli.command()
+def fund_hs300_corr(
+    input_dir: str = "/mnt/dataset/fund_quote_adjusted",
+    output_dir: str = "/mnt/dataset/fund_hs300_correlation",
+) -> None:
+    """计算沪深300关联基金与510300的滚动相关性（5/10/20日窗口）"""
+    console.print("[cyan]计算沪深300关联基金滚动相关性...[/cyan]")
+    count = convert_fund_hs300_correlation(input_dir=input_dir, output_dir=output_dir)
     console.print(f"[green]完成! 共 {count} 只基金[/green]")
 
 
