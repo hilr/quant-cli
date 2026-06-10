@@ -837,24 +837,82 @@ def convert_fund_flow(
 BENCHMARK_CODE = "510300"
 CORR_WINDOWS = [5, 10, 20]
 
+# 排除的基金类型关键词
+_EXCLUDE_KEYWORDS = [
+    # 固收/货币
+    "债", "货币", "短融", "日利", "添益", "城投", "企债", "金利", "快线",
+    "财富宝", "添利", "国开", "快钱", "天金",
+    # 海外
+    "纳斯达克", "纳指", "标普", "恒生", "恒指", "港股", "港美", "香港",
+    "HK", "H股", "中概", "美股", "海外", "日经", "德国", "法国", "英国",
+    "印度", "东南亚", "日本", "越南", "韩国", "中韩", "新加坡", "欧洲",
+    "金砖", "东盟", "亚太", "全球", "QDII", "沪港深", "沪港通",
+    "REIT", "reits",
+    # 其他非权益
+    "石油LOF", "石油基金", "港医", "港高",
+    # REITs (508xxx 代码)
+    "安居", "高速REIT", "地产租住", "亦庄", "科投", "清能",
+    "REITs", "产业园", "仓储", "物流REIT", "高速", "公路REIT",
+    "有巢", "两江", "金隅", "九州通",
+    # 商品
+    "原油", "黄金", "白银", "豆粕", "铜", "铝", "油气", "有色ETF",
+]
+
+# REITs 代码前缀
+_REIT_CODE_PREFIXES = ("508", "506")
+
 # 关键词 → 基金类型，按优先级排序（长关键词优先匹配）
 _FUND_TYPE_RULES = [
-    ("沪深港", "沪深港300"),
-    ("HGS", "HGS300"),
-    ("AH", "AH300"),
-    ("创业板", "创业板300"),
+    ("沪深港300", "沪深港300"),
+    ("AH300", "AH300"),
+    ("HGS300", "HGS300"),
+    ("创业板", "创业板"),
     ("现金流", "300现金流"),
     ("等权", "300等权"),
     ("国证2000", "国证2000"),
-    ("成长", "300成长"),
-    ("价值", "300价值"),
-    ("增强", "300增强"),
-    ("指增", "300增强"),
-    ("ETF增", "300增强"),
-    ("红利", "300红利"),
-    ("ESG", "300ESG"),
-    ("LOF", "300LOF"),
-    ("民企", "300民企"),
+    ("沪深300", "沪深300"),
+    ("HS300", "沪深300"),
+    ("300ETF", "沪深300"),
+    ("300LOF", "沪深300LOF"),
+    ("沪深300LOF", "沪深300LOF"),
+    ("300增强", "300增强"),
+    ("300指增", "300增强"),
+    ("300成长", "300成长"),
+    ("300价值", "300价值"),
+    ("300红利", "300红利"),
+    ("300ESG", "300ESG"),
+    ("成长", "成长"),
+    ("价值", "价值"),
+    ("增强", "增强"),
+    ("指增", "增强"),
+    ("红利", "红利"),
+    ("ESG", "ESG"),
+    ("LOF", "LOF"),
+    ("证券", "证券"),
+    ("银行", "银行"),
+    ("军工", "军工"),
+    ("医药", "医药"),
+    ("消费", "消费"),
+    ("科技", "科技"),
+    ("芯片", "芯片"),
+    ("半导体", "半导体"),
+    ("新能源", "新能源"),
+    ("光伏", "光伏"),
+    ("汽车", "汽车"),
+    ("房地产", "房地产"),
+    ("有色", "有色"),
+    ("煤炭", "煤炭"),
+    ("钢铁", "钢铁"),
+    ("石油", "石油"),
+    ("养殖", "养殖"),
+    ("粮食", "粮食"),
+    ("科创", "科创"),
+    ("50ETF", "上证50"),
+    ("500ETF", "中证500"),
+    ("1000ETF", "中证1000"),
+    ("2000", "中证2000"),
+    ("A500", "中证A500"),
+    ("A50", "中证A50"),
 ]
 
 
@@ -863,14 +921,14 @@ def _fund_type(name: str) -> str:
     for keyword, type_name in _FUND_TYPE_RULES:
         if keyword in name:
             return type_name
-    return "沪深300"
+    return name  # 无法分类的基金，用完整名称作为类型（不会去重）
 
 
 def convert_fund_hs300_correlation(
     input_dir: str,
     output_dir: str,
 ) -> int:
-    """筛选沪深300关联基金，同类型取成交额最大，计算与510300的滚动相关性（5/10/20日窗口）"""
+    """排除债券/货币/国外指数基金，同类型取成交额最大，计算与510300的滚动相关性（5/10/20日窗口）"""
     input_path = Path(input_dir)
     output_path = Path(output_dir)
     output_path.mkdir(parents=True, exist_ok=True)
@@ -890,8 +948,9 @@ def convert_fund_hs300_correlation(
         .select(["date", "bm_return"])
     )
 
-    # 2. 筛选名称含"300"的基金（排除 510300 自身），且最新日期与基准一致
+    # 2. 筛选基金：排除债券/货币/国外指数，排除 510300 自身，日期须与基准一致，至少20个交易日
     bm_latest_date = benchmark.filter(pl.col("bm_return").is_not_null())["date"][-1]
+    min_days = max(CORR_WINDOWS)
     fund_info = []
     for pf in input_path.glob("*.parquet"):
         code = pf.stem
@@ -900,10 +959,14 @@ def convert_fund_hs300_correlation(
         try:
             df_head = pl.read_parquet(pf, columns=["name", "date", "turnover"])
             name = df_head["name"][0]
-            if "300" not in name:
+            if any(kw in name for kw in _EXCLUDE_KEYWORDS):
+                continue
+            if code.startswith(_REIT_CODE_PREFIXES):
                 continue
             latest_date = df_head["date"][-1]
             if latest_date != bm_latest_date:
+                continue
+            if len(df_head) < min_days:
                 continue
             latest_turnover = df_head.sort("date").tail(1)["turnover"][0]
             fund_info.append({
