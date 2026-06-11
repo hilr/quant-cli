@@ -7,6 +7,7 @@ from quant.convert import (convert_stock_quote, convert_margin_trade, convert_ad
                            convert_ma, convert_boll, convert_fund_shares, convert_fund_quote, convert_fund_adjust,
                            convert_fund_flow, convert_index_quote, convert_index_ma, convert_index_boll,
                            convert_fwd_return, convert_historical_stats, convert_filter_volume_spike,
+                           convert_filter_ma_converge,
                            convert_fund_hs300_correlation)
 
 console = Console()
@@ -242,6 +243,61 @@ def filter_volume_spike(
         console.print(f"[dim]... 还有 {len(results) - 100} 只股票未显示[/dim]")
 
     # 导出 CSV
+    if output_csv:
+        import csv
+        with open(output_csv, "w", newline="", encoding="utf-8") as f:
+            writer = csv.DictWriter(f, fieldnames=results[0].keys())
+            writer.writeheader()
+            writer.writerows(results)
+        console.print(f"[green]结果已导出: {output_csv}[/green]")
+
+
+@cli.command()
+def filter_ma_converge(
+    date: str,
+    input_dir: str = "/mnt/dataset/stock_quote_ma",
+    min_market_cap: float = 200e8,
+    min_turnover: float = 10e8,
+    max_ma_spread: float = 0.1,
+    output_csv: str = None,
+) -> None:
+    """筛选均线收敛股票：市值达标 + 非ST + 成交额达标 + 均线收敛"""
+    console.print(f"[cyan]筛选均线收敛股票 ({date})...[/cyan]")
+    results = convert_filter_ma_converge(
+        ma_dir=input_dir, date=date,
+        min_market_cap=min_market_cap, min_turnover=min_turnover,
+        max_ma_spread=max_ma_spread,
+    )
+
+    if not results:
+        console.print("[yellow]没有找到符合条件的股票[/yellow]")
+        return
+
+    table = Table(title=f"均线收敛股票 (共 {len(results)} 只)")
+    table.add_column("代码", style="cyan")
+    table.add_column("收盘价", style="white")
+    table.add_column("市值", style="yellow")
+    table.add_column("成交额", style="blue")
+    table.add_column("MA max", style="green")
+    table.add_column("MA min", style="green")
+    table.add_column("MA spread", style="bright_red")
+
+    for r in results[:100]:
+        table.add_row(
+            r["code"],
+            f"{r['close']:.2f}",
+            f"{r['market_cap']/1e8:.0f}亿",
+            f"{r['turnover']/1e8:.1f}亿",
+            f"{r['ma_max']:.2f}",
+            f"{r['ma_min']:.2f}",
+            f"{r['ma_spread']:.2%}",
+        )
+
+    console.print(table)
+
+    if len(results) > 100:
+        console.print(f"[dim]... 还有 {len(results) - 100} 只股票未显示[/dim]")
+
     if output_csv:
         import csv
         with open(output_csv, "w", newline="", encoding="utf-8") as f:
