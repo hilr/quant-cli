@@ -614,6 +614,97 @@ def convert_filter_volume_spike(
     return results
 
 
+# ============== filter_ma_converge ==============
+
+MA_WINDOWS = [5, 10, 20, 60, 120, 250]
+MA_CONVERGE_WINDOWS = [60, 120, 250]
+
+
+def convert_filter_ma_converge(
+    ma_dir: str,
+    date: str,
+    min_market_cap: float = 200e8,
+    min_turnover: float = 10e8,
+    max_ma_spread: float = 0.1,
+) -> list[dict]:
+    """筛选均线收敛的股票：
+    1. 指定日期市值 > min_market_cap
+    2. 不是 ST 股票
+    3. 当日成交额 >= min_turnover
+    4. MA250 以内的均线中，max / min - 1 <= max_ma_spread
+    """
+    ma_path = Path(ma_dir)
+    parquet_files = sorted(ma_path.glob("*.parquet"))
+    if not parquet_files:
+        raise FileNotFoundError(f"No parquet files found in {ma_path}")
+
+    ma_cols = [f"ma{w}" for w in MA_CONVERGE_WINDOWS]
+    required_cols = ["date", "code", "close", "turnover", "market_cap", "return_5d"] + ma_cols
+
+    # 读取当天原始数据获取股票名称（用于过滤 ST）
+    raw_csv = Path(ma_dir).parent.parent / "readonly_dataset" / "finance_sina" / "stock_quote" / f"{date}.csv"
+    if raw_csv.exists():
+        raw_df = pl.read_csv(raw_csv, columns=["code", "name"])
+        raw_df = raw_df.with_columns(pl.col("code").cast(pl.String).str.zfill(6))
+        st_codes = set(raw_df.filter(
+            pl.col("name").str.to_uppercase().str.contains("ST")
+        )["code"].to_list())
+    else:
+        st_codes = set()
+
+    results = []
+
+    for pf in parquet_files:
+        try:
+            df = pl.read_parquet(pf, columns=required_cols)
+        except Exception:
+            continue
+
+        code = pf.stem
+        if code in st_codes:
+            continue
+
+        row = df.filter(pl.col("date") == date)
+        if len(row) == 0:
+            continue
+
+        r = row.row(0, named=True)
+
+        if len(df) < 1000:
+            continue
+
+        if r["market_cap"] < min_market_cap:
+            continue
+        if r["turnover"] < min_turnover:
+            continue
+        if r["close"] >= r["ma120"]:
+            continue
+        if r.get("return_5d") is None or r["return_5d"] <= 0:
+            continue
+
+        ma_vals = [r[c] for c in ma_cols]
+        if len(ma_vals) != len(ma_cols) or any(v is None for v in ma_vals):
+            continue
+
+        ma_max = max(ma_vals)
+        ma_min = min(ma_vals)
+        if ma_min == 0 or (ma_max / ma_min - 1) > max_ma_spread:
+            continue
+
+        results.append({
+            "code": code,
+            "close": r["close"],
+            "market_cap": r["market_cap"],
+            "turnover": r["turnover"],
+            "ma_max": ma_max,
+            "ma_min": ma_min,
+            "ma_spread": ma_max / ma_min - 1,
+        })
+
+    results.sort(key=lambda x: x["market_cap"], reverse=True)
+    return results
+
+
 # ============== fund ==============
 
 def _read_fund_shares(source_path: Path, exchange: str) -> list[pl.DataFrame]:
