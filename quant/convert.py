@@ -278,6 +278,9 @@ def convert_ma(
         ] + [
             pl.col("turnover").rolling_mean(w).alias(f"turnover_ma{w}")
             for w in windows
+        ] + [
+            ((pl.col("close") - pl.col("close").shift(w)) / pl.col("close").shift(w) / w).alias(f"return_{w}d")
+            for w in windows
         ])
 
         df.write_parquet(output_path / pf.name)
