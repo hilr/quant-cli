@@ -76,127 +76,70 @@
 
 ---
 
-### stock_quote_ma — 均线
+### stock_quote_ta — 技术指标
 
 | 项 | 内容 |
 |---|------|
-| 命令 | `uv run python -m quant.cli ma <input_dir> <output_dir>` |
+| 命令 | `uv run python -m quant.cli ta <input_dir> <output_dir>` |
 | 输入 | `{input_dir}/{code}.parquet`（stock_quote_adjusted） |
 | 输出 | `{output_dir}/{code}.parquet` |
-| 逻辑 | sort by date → rolling_mean(close, window) + rolling_mean(turnover, window) |
-| 新增字段 | ma5, ma10, ma20, ma60, ma120, ma250, turnover_ma5, turnover_ma10, turnover_ma20, turnover_ma60, turnover_ma120, turnover_ma250 |
+| 逻辑 | sort by date → 一次计算均线、布林带、历史统计、前向收益、收益率、波动率等 |
 | 产出 | 6207 只股票 |
 
 **新增字段含义：**
+
+均线（收盘价）：
 | 字段 | 含义 |
 |------|------|
-| ma5 | 5日均线（收盘价） |
-| ma10 | 10日均线（收盘价） |
-| ma20 | 20日均线（收盘价） |
-| ma60 | 60日均线（收盘价） |
-| ma120 | 120日均线（收盘价） |
-| ma250 | 250日均线（收盘价） |
-| turnover_ma5 | 5日成交额均线 |
-| turnover_ma10 | 10日成交额均线 |
-| turnover_ma20 | 20日成交额均线 |
-| turnover_ma60 | 60日成交额均线 |
-| turnover_ma120 | 120日成交额均线 |
-| turnover_ma250 | 250日成交额均线 |
+| ma5, ma10, ma20, ma60, ma120, ma250 | 收盘价N日均线 |
 
----
-
-### stock_quote_boll — 布林带
-
-| 项 | 内容 |
-|---|------|
-| 命令 | `uv run python -m quant.cli boll <input_dir> <output_dir>` |
-| 输入 | `{input_dir}/{code}.parquet`（stock_quote_adjusted） |
-| 输出 | `{output_dir}/{code}.parquet` |
-| 逻辑 | mid = rolling_mean, std = rolling_std, upper = mid + 2*std, lower = mid - 2*std, period=[20, 60] |
-| 新增字段 | boll_mid20, boll_upper20, boll_lower20, boll_mid60, boll_upper60, boll_lower60, turnover_boll_* |
-| 产出 | 6207 只股票 |
-
-**新增字段含义：**
+均线（成交额）：
 | 字段 | 含义 |
 |------|------|
-| boll_mid20 | 20日布林中轨（收盘价均值） |
-| boll_upper20 | 20日布林上轨（中轨+2倍标准差） |
-| boll_lower20 | 20日布林下轨（中轨-2倍标准差） |
-| boll_mid60 | 60日布林中轨 |
-| boll_upper60 | 60日布林上轨 |
-| boll_lower60 | 60日布林下轨 |
-| turnover_boll_mid20/upper20/lower20 | 成交额布林带（20日） |
-| turnover_boll_mid60/upper60/lower60 | 成交额布林带（60日） |
+| turnover_ma5, turnover_ma10, turnover_ma20, turnover_ma60, turnover_ma120, turnover_ma250 | 成交额N日均线 |
 
----
-
-### stock_historical_stats — 历史统计
-
-| 项 | 内容 |
-|---|------|
-| 命令 | `uv run python -m quant.cli historical-stats <input_dir> <output_dir>` |
-| 输入 | `{input_dir}/{code}.parquet`（stock_quote_adjusted） |
-| 输出 | `{output_dir}/{code}.parquet` |
-| 逻辑 | rolling_max(high), rolling_min(low), return=(close-close_shift)/close_shift*100 |
-| 新增字段 | high_20/60/120/250/500/750/1000, low_20/60/120/250/500/750/1000, return_20/60/120/250/500/750/1000, close_20/60/120/250/500/750/1000 |
-| 产出 | 6207 只股票 |
-
-**新增字段含义：**
+收益率：
 | 字段 | 含义 |
 |------|------|
-| high_20 | 过去20日最高价 |
-| low_20 | 过去20日最低价 |
-| return_20 | 过去20日收益率（%） |
-| close_20 | 当前收盘价 |
-| high_60 | 过去60日最高价 |
-| low_60 | 过去60日最低价 |
-| return_60 | 过去60日收益率（%） |
-| close_60 | 当前收盘价 |
-| high_120 | 过去120日最高价 |
-| low_120 | 过去120日最低价 |
-| return_120 | 过去120日收益率（%） |
-| close_120 | 当前收盘价 |
-| high_250 | 过去250日最高价 |
-| low_250 | 过去250日最低价 |
-| return_250 | 过去250日收益率（%） |
-| close_250 | 当前收盘价 |
-| high_500 | 过去500日最高价 |
-| low_500 | 过去500日最低价 |
-| return_500 | 过去500日收益率（%） |
-| close_500 | 当前收盘价 |
-| high_750 | 过去750日最高价 |
-| low_750 | 过去750日最低价 |
-| return_750 | 过去750日收益率（%） |
-| close_750 | 当前收盘价 |
-| high_1000 | 过去1000日最高价 |
-| low_1000 | 过去1000日最低价 |
-| return_1000 | 过去1000日收益率（%） |
-| close_1000 | 当前收盘价 |
+| return_1d | 每日收益率 (close - prev_close) / prev_close |
+| return_5d, return_10d, return_20d, return_60d, return_120d, return_250d | N日日化收益率 |
 
----
-
-### stock_fwd_return — 前向收益
-
-| 项 | 内容 |
-|---|------|
-| 命令 | `uv run python -m quant.cli fwd-return <input_dir> <output_dir>` |
-| 输入 | `{input_dir}/{code}.parquet`（stock_quote_adjusted） |
-| 输出 | `{output_dir}/{code}.parquet` |
-| 逻辑 | 计算未来N日的最高/最低价、收盘价及收益率百分比 |
-| 新增字段 | fwd5_*, fwd10_*（high/high_day/high_pct/low/low_day/low_pct/close/final_pct） |
-| 产出 | 6207 只股票 |
-
-**新增字段含义：**
+波动率：
 | 字段 | 含义 |
 |------|------|
-| fwd5_high | 未来5日最高价 |
-| fwd5_high_day | 达到最高价的天数（1-5） |
-| fwd5_high_pct | 最高价涨幅（%） |
-| fwd5_low | 未来5日最低价 |
-| fwd5_low_day | 达到最低价的天数（1-5） |
-| fwd5_low_pct | 最低价跌幅（%） |
-| fwd5_close | 未来5日收盘价 |
-| fwd5_final_pct | 5日收益率（%） |
+| volatility_1d | 日波动率 ln(close / prev_close) |
+| volatility_std10, volatility_std20, volatility_std40, volatility_std60, volatility_std120 | 日波动率N日滚动标准差 |
+
+成交额标准差：
+| 字段 | 含义 |
+|------|------|
+| turnover_std10, turnover_std20, turnover_std40 | 成交额N日滚动标准差 |
+
+布林带（收盘价）：
+| 字段 | 含义 |
+|------|------|
+| boll_mid20, boll_upper20, boll_lower20 | 20日布林中轨/上轨/下轨 |
+| boll_mid60, boll_upper60, boll_lower60 | 60日布林中轨/上轨/下轨 |
+
+布林带（成交额）：
+| 字段 | 含义 |
+|------|------|
+| turnover_boll_mid20, turnover_boll_upper20, turnover_boll_lower20 | 成交额20日布林带 |
+| turnover_boll_mid60, turnover_boll_upper60, turnover_boll_lower60 | 成交额60日布林带 |
+
+历史统计：
+| 字段 | 含义 |
+|------|------|
+| high_{20,60,120,250,500,750,1000} | 过去N日最高价 |
+| low_{20,60,120,250,500,750,1000} | 过去N日最低价 |
+| return_{20,60,120,250,500,750,1000} | 过去N日区间收益率（%） |
+
+前向收益：
+| 字段 | 含义 |
+|------|------|
+| fwd5_high, fwd5_low, fwd5_close | 未来5日最高/最低/收盘价 |
+| fwd5_high_day, fwd5_low_day | 未来5日最高/最低价出现天数（1-5） |
+| fwd5_high_pct, fwd5_low_pct, fwd5_final_pct | 未来5日最大涨幅/最大回撤/最终收益（%） |
 | fwd10_* | 同上，未来10日 |
 
 ---
@@ -339,14 +282,14 @@
 | 项 | 内容 |
 |---|------|
 | 命令 | `uv run python -m quant.cli filter-volume-spike <input_dir> <min_market_cap> [options]` |
-| 输入 | `{input_dir}/{code}.parquet`（stock_quote_ma） |
+| 输入 | `{input_dir}/{code}.parquet`（stock_quote_ta） |
 | 输出 | 控制台表格（可选 CSV 文件） |
 | 筛选条件 | 市值 > min_market_cap，过去 N 日内有成交额 > M 倍 20日均线 |
 
 **参数：**
 | 参数 | 说明 | 默认值 |
 |------|------|--------|
-| input_dir | 输入目录（stock_quote_ma） | 必填 |
+| input_dir | 输入目录（stock_quote_ta） | 必填 |
 | min_market_cap | 最小市值（单位：元） | 必填（100亿=10000000000） |
 | lookback-days | 回看交易日数 | 10 |
 | volume-multiplier | 放量倍数 | 2.0 |
@@ -355,13 +298,13 @@
 **使用示例：**
 ```bash
 # 筛选市值100亿以上，过去10日内有2倍放量的股票
-uv run python -m quant.cli filter-volume-spike /mnt/dataset/stock_quote_ma 10000000000
+uv run python -m quant.cli filter-volume-spike /mnt/dataset/stock_quote_ta 10000000000
 
 # 自定义参数
-uv run python -m quant.cli filter-volume-spike /mnt/dataset/stock_quote_ma 50000000000 --lookback-days 15 --volume-multiplier 3.0
+uv run python -m quant.cli filter-volume-spike /mnt/dataset/stock_quote_ta 50000000000 --lookback-days 15 --volume-multiplier 3.0
 
 # 导出结果
-uv run python -m quant.cli filter-volume-spike /mnt/dataset/stock_quote_ma 10000000000 --output-csv /tmp/volume_spike.csv
+uv run python -m quant.cli filter-volume-spike /mnt/dataset/stock_quote_ta 10000000000 --output-csv /tmp/volume_spike.csv
 ```
 
 **输出示例：**
@@ -398,10 +341,7 @@ uv run python -m quant.cli filter-volume-spike /mnt/dataset/stock_quote_ma 10000
 │  stock_quote_history ← finance_sina/stock_quote                │
 │       ↓                                                         │
 │  stock_quote_adjusted (前复权)                                  │
-│       ├─→ stock_quote_ma (均线)                                 │
-│       ├─→ stock_quote_boll (布林带)                             │
-│       ├─→ stock_historical_stats (历史统计)                     │
-│       └─→ stock_fwd_return (前向收益)                           │
+│       └─→ stock_quote_ta (技术指标)                              │
 └─────────────────────────────────────────────────────────────────┘
 
 ┌─────────────────────────────────────────────────────────────────┐

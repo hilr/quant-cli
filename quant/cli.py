@@ -4,8 +4,8 @@ from rich.console import Console
 from rich.table import Table
 
 from quant.convert import (convert_stock_quote, convert_margin_trade, convert_adjust, convert_margin_trade_daily,
-                           convert_ma, convert_boll, convert_fund_shares, convert_fund_quote, convert_fund_adjust,
-                           convert_fund_flow, convert_index_quote, convert_index_ma, convert_index_boll,
+                           convert_ta, convert_boll, convert_fund_shares, convert_fund_quote, convert_fund_adjust,
+                           convert_fund_flow, convert_index_quote, convert_index_ta, convert_index_boll,
                            convert_fwd_return, convert_historical_stats, convert_filter_volume_spike,
                            convert_filter_ma_converge,
                            convert_fund_hs300_correlation)
@@ -39,13 +39,13 @@ def index_quote(
 
 
 @cli.command()
-def index_ma(
+def index_ta(
     input_dir: str = "/mnt/dataset/index_quote_history",
-    output_dir: str = "/mnt/dataset/index_quote_ma",
+    output_dir: str = "/mnt/dataset/index_quote_ta",
 ) -> None:
     """基于指数行情计算 close 和 turnover 的滚动均线"""
     console.print(f"[cyan]计算指数均线...[/cyan]")
-    count = convert_index_ma(input_dir=input_dir, output_dir=output_dir)
+    count = convert_index_ta(input_dir=input_dir, output_dir=output_dir)
     console.print(f"[green]完成! 共 {count} 个指数[/green]")
 
 
@@ -95,13 +95,13 @@ def margin_trade_daily(
 
 
 @cli.command()
-def ma(
+def ta(
     input_dir: str = "/mnt/dataset/stock_quote_adjusted",
-    output_dir: str = "/mnt/dataset/stock_quote_ma",
+    output_dir: str = "/mnt/dataset/stock_quote_ta",
 ) -> None:
-    """基于前复权数据计算 close 的滚动均线（ma5/10/20/60/120/250）"""
+    """基于前复权数据计算均线、布林带、历史统计、前向收益等指标"""
     console.print(f"[cyan]计算均线...[/cyan]")
-    count = convert_ma(input_dir=input_dir, output_dir=output_dir)
+    count = convert_ta(input_dir=input_dir, output_dir=output_dir)
     console.print(f"[green]完成! 共 {count} 只股票[/green]")
 
 
@@ -255,7 +255,7 @@ def filter_volume_spike(
 @cli.command()
 def filter_ma_converge(
     date: str,
-    input_dir: str = "/mnt/dataset/stock_quote_ma",
+    input_dir: str = "/mnt/dataset/stock_quote_ta",
     min_market_cap: float = 200e8,
     min_turnover: float = 10e8,
     max_ma_spread: float = 0.1,

@@ -7,6 +7,15 @@ from pathlib import Path
 DEFAULT_DATA_PATH = "/mnt/readonly_dataset"
 OUTPUT_DATA_PATH = "/mnt/dataset"
 
+# ============== TA 窗口常量 ==============
+
+TA_MA_WINDOWS = [5, 10, 20, 60, 120, 250]
+TA_BOLL_PERIODS = [20, 60]
+TA_HIST_PERIODS = [1000, 750, 500, 250, 120, 60, 20]
+TA_TURNOVER_STD_WINDOWS = [10, 20, 40]
+TA_VOLATILITY_STD_WINDOWS = [10, 20, 40, 60, 120]
+TA_FWD_WINDOWS = [5, 10]
+
 
 # ============== stock_quote ==============
 
@@ -249,45 +258,109 @@ def convert_adjust(
     return count
 
 
-# ============== ma ==============
+# ============== ta ==============
 
-def convert_ma(
-    input_dir: str = "/mnt/dataset/stock_quote_adjusted",
-    output_dir: str = "/mnt/dataset/stock_quote_ma",
+def _add_ma(df: pl.DataFrame, windows: list[int]) -> pl.DataFrame:
+    return df.with_columns([
+        pl.col("close").rolling_mean(w).alias(f"ma{w}")
+        for w in windows
+    ] + [
+        pl.col("turnover").rolling_mean(w).alias(f"turnover_ma{w}")
+        for w in windows
+    ] + [
+        ((pl.col("close") - pl.col("close").shift(w)) / pl.col("close").shift(w) / w).alias(f"return_{w}d")
+        for w in windows
+    ])
+
+
+def _add_volatility(df: pl.DataFrame, std_windows: list[int], turnover_std_windows: list[int]) -> pl.DataFrame:
+    df = df.with_columns([
+        ((pl.col("close") - pl.col("prev_close")) / pl.col("prev_close")).alias("return_1d"),
+        (pl.col("close") / pl.col("prev_close")).log().alias("volatility_1d"),
+    ])
+    return df.with_columns([
+        pl.col("volatility_1d").rolling_std(w).alias(f"volatility_std{w}")
+        for w in std_windows
+    ] + [
+        pl.col("turnover").rolling_std(w).alias(f"turnover_std{w}")
+        for w in turnover_std_windows
+    ])
+
+
+def _add_boll(df: pl.DataFrame, periods: list[int]) -> pl.DataFrame:
+    for p in periods:
+        std_c = pl.col("close").rolling_std(p)
+        std_t = pl.col("turnover").rolling_std(p)
+        df = df.with_columns([
+            pl.col(f"ma{p}").alias(f"boll_mid{p}"),
+            (pl.col(f"ma{p}") + 2 * std_c).alias(f"boll_upper{p}"),
+            (pl.col(f"ma{p}") - 2 * std_c).alias(f"boll_lower{p}"),
+            pl.col(f"turnover_ma{p}").alias(f"turnover_boll_mid{p}"),
+            (pl.col(f"turnover_ma{p}") + 2 * std_t).alias(f"turnover_boll_upper{p}"),
+            (pl.col(f"turnover_ma{p}") - 2 * std_t).alias(f"turnover_boll_lower{p}"),
+        ])
+    return df
+
+
+def _add_hist(df: pl.DataFrame, periods: list[int]) -> pl.DataFrame:
+    return df.with_columns([
+        expr
+        for p in periods
+        for expr in [
+            pl.col("high").rolling_max(p).alias(f"high_{p}"),
+            pl.col("low").rolling_min(p).alias(f"low_{p}"),
+            ((pl.col("close") - pl.col("close").shift(p - 1)) / pl.col("close").shift(p - 1) * 100).alias(f"return_{p}"),
+        ]
+    ])
+
+
+def _add_fwd(df: pl.DataFrame, windows: list[int]) -> pl.DataFrame:
+    for N in windows:
+        df = _compute_fwd(df, N, str(N))
+    fwd_drop = [c for c in df.columns if c.startswith("_h") or c.startswith("_l") or c.startswith("_c")]
+    return df.drop(fwd_drop)
+
+
+def _compute_ta_pipeline(
+    input_dir: str,
+    output_dir: str,
+    indicators: list,
+    label: str,
 ) -> int:
-    """基于前复权数据计算 close 的滚动均线"""
+    """通用 TA 计算管道：逐文件读取 → 按顺序应用指标 → 写入"""
     input_path = Path(input_dir)
     output_path = Path(output_dir)
     output_path.mkdir(parents=True, exist_ok=True)
-
     parquet_files = sorted(input_path.glob("*.parquet"))
     if not parquet_files:
         raise FileNotFoundError(f"No parquet files found in {input_path}")
-
-    windows = [5, 10, 20, 60, 120, 250]
-
     count = 0
     for pf in parquet_files:
-        df = pl.read_parquet(pf)
-        df = df.sort("date")
-
-        # 批量计算 close 和 turnover 的 MA
-        df = df.with_columns([
-            pl.col("close").rolling_mean(w).alias(f"ma{w}")
-            for w in windows
-        ] + [
-            pl.col("turnover").rolling_mean(w).alias(f"turnover_ma{w}")
-            for w in windows
-        ] + [
-            ((pl.col("close") - pl.col("close").shift(w)) / pl.col("close").shift(w) / w).alias(f"return_{w}d")
-            for w in windows
-        ])
-
+        df = pl.read_parquet(pf).sort("date")
+        for indicator in indicators:
+            df = indicator(df)
         df.write_parquet(output_path / pf.name)
         count += 1
-
-    print(f"Saved {count} stocks to {output_path}")
+    print(f"Saved {count} {label} to {output_path}")
     return count
+
+
+def convert_ta(
+    input_dir: str = "/mnt/dataset/stock_quote_adjusted",
+    output_dir: str = "/mnt/dataset/stock_quote_ta",
+) -> int:
+    """基于前复权数据计算均线、布林带、历史统计、前向收益等指标"""
+    return _compute_ta_pipeline(
+        input_dir, output_dir,
+        indicators=[
+            lambda df: _add_ma(df, TA_MA_WINDOWS),
+            lambda df: _add_volatility(df, TA_VOLATILITY_STD_WINDOWS, TA_TURNOVER_STD_WINDOWS),
+            lambda df: _add_boll(df, TA_BOLL_PERIODS),
+            lambda df: _add_hist(df, TA_HIST_PERIODS),
+            lambda df: _add_fwd(df, TA_FWD_WINDOWS),
+        ],
+        label="stocks",
+    )
 
 
 # ============== boll ==============
@@ -335,13 +408,21 @@ def convert_boll(
 
 # ============== index ma/boll ==============
 
-def convert_index_ma(
+def convert_index_ta(
     input_dir: str = "/mnt/dataset/index_quote_history",
-    output_dir: str = "/mnt/dataset/index_quote_ma",
+    output_dir: str = "/mnt/dataset/index_quote_ta",
 ) -> int:
     """基于指数行情计算 close 和 turnover 的滚动均线"""
-    windows = [5, 10, 20, 60, 120, 250]
-    return _compute_ma(input_dir, output_dir, windows, "indices")
+    return _compute_ta_pipeline(
+        input_dir, output_dir,
+        indicators=[
+            lambda df: _add_ma(df, TA_MA_WINDOWS),
+            lambda df: _add_volatility(df, TA_VOLATILITY_STD_WINDOWS, TA_TURNOVER_STD_WINDOWS),
+            lambda df: _add_boll(df, TA_BOLL_PERIODS),
+            lambda df: _add_hist(df, TA_HIST_PERIODS),
+        ],
+        label="indices",
+    )
 
 
 def convert_index_boll(
@@ -350,29 +431,6 @@ def convert_index_boll(
 ) -> int:
     """基于指数行情计算布林带（period=20/60, k=2）"""
     return _compute_boll(input_dir, output_dir, [20, 60], "indices")
-
-
-def _compute_ma(input_dir: str, output_dir: str, windows: list[int], label: str) -> int:
-    input_path = Path(input_dir)
-    output_path = Path(output_dir)
-    output_path.mkdir(parents=True, exist_ok=True)
-    parquet_files = sorted(input_path.glob("*.parquet"))
-    if not parquet_files:
-        raise FileNotFoundError(f"No parquet files found in {input_path}")
-    count = 0
-    for pf in parquet_files:
-        df = pl.read_parquet(pf).sort("date")
-        df = df.with_columns([
-            pl.col("close").rolling_mean(w).alias(f"ma{w}")
-            for w in windows
-        ] + [
-            pl.col("turnover").rolling_mean(w).alias(f"turnover_ma{w}")
-            for w in windows
-        ])
-        df.write_parquet(output_path / pf.name)
-        count += 1
-    print(f"Saved {count} {label} to {output_path}")
-    return count
 
 
 def _compute_boll(input_dir: str, output_dir: str, periods: list[int], label: str) -> int:
@@ -404,12 +462,15 @@ def _compute_boll(input_dir: str, output_dir: str, periods: list[int], label: st
 
 def _compute_fwd(df: pl.DataFrame, N: int, tag: str) -> pl.DataFrame:
     """对单个股票计算前向 N 日收益率特征"""
-    for offset in range(1, N + 1):
-        df = df.with_columns([
-            pl.col("high").shift(-offset).alias(f"_h{offset}"),
-            pl.col("low").shift(-offset).alias(f"_l{offset}"),
-        ])
-    df = df.with_columns(pl.col("close").shift(-N).alias(f"_c{N}"))
+    df = df.with_columns([
+        pl.col("high").shift(-offset).alias(f"_h{offset}")
+        for offset in range(1, N + 1)
+    ] + [
+        pl.col("low").shift(-offset).alias(f"_l{offset}")
+        for offset in range(1, N + 1)
+    ] + [
+        pl.col("close").shift(-N).alias(f"_c{N}"),
+    ])
 
     h_cols = [f"_h{i}" for i in range(1, N + 1)]
     l_cols = [f"_l{i}" for i in range(1, N + 1)]
@@ -533,7 +594,7 @@ def convert_filter_volume_spike(
     if not parquet_files:
         raise FileNotFoundError(f"No parquet files found in {input_path}")
 
-    adj_dir = Path(input_dir_adj) if input_dir_adj else Path(str(input_path).replace("ma", "adjusted"))
+    adj_dir = Path(input_dir_adj) if input_dir_adj else Path(str(input_path).replace("ta", "adjusted"))
     results = []
     ma_col = f"turnover_ma{ma_period}"
     required_cols = ["date", "code", "turnover", ma_col, "market_cap"]
