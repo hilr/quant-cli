@@ -7,6 +7,7 @@ from quant.convert import (convert_stock_quote, convert_margin_trade, convert_ad
                            convert_ta, convert_boll, convert_fund_shares, convert_fund_quote, convert_fund_adjust,
                            convert_fund_flow, convert_index_quote, convert_index_ta, convert_index_boll,
                            convert_fwd_return, convert_historical_stats, convert_filter_volume_spike,
+                           convert_filter_volume_spike_history,
                            convert_filter_ma_converge,
                            convert_fund_hs300_correlation)
 from quant.pipeline import build_stages, run_pipeline
@@ -264,6 +265,27 @@ def filter_volume_spike(
             writer.writeheader()
             writer.writerows(results)
         console.print(f"[green]结果已导出: {output_csv}[/green]")
+
+
+@cli.command()
+def filter_volume_spike_history(
+    input_dir: str,
+    output_csv: str,
+    min_market_cap: float,
+    min_ratio: float = 2.0,
+    ma_period: int = 10,
+    min_date: str = None,
+    require_bull_alignment: bool = False,
+) -> None:
+    """扫描所有历史日期，批量筛每日触发放量的股票，输出单个 CSV"""
+    console.print(f"[cyan]批量筛选历史放量股票...[/cyan]")
+    count = convert_filter_volume_spike_history(
+        input_dir=input_dir, output_csv=output_csv,
+        min_market_cap=min_market_cap, min_ratio=min_ratio,
+        ma_period=ma_period, min_date=min_date,
+        require_bull_alignment=require_bull_alignment,
+    )
+    console.print(f"[green]完成! 共 {count} 条放量记录 → {output_csv}[/green]")
 
 
 @cli.command()
