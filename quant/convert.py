@@ -594,7 +594,7 @@ def convert_filter_volume_spike(
     if not parquet_files:
         raise FileNotFoundError(f"No parquet files found in {input_path}")
 
-    adj_dir = Path(input_dir_adj) if input_dir_adj else Path(str(input_path).replace("ta", "adjusted"))
+    adj_dir = Path(input_dir_adj) if input_dir_adj else input_path.with_name(input_path.name.replace("ta", "adjusted"))
     results = []
     ma_col = f"turnover_ma{ma_period}"
     required_cols = ["date", "code", "turnover", ma_col, "market_cap"]
