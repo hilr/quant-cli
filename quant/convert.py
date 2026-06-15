@@ -675,6 +675,73 @@ def convert_filter_volume_spike(
     return results
 
 
+def convert_filter_volume_spike_history(
+    input_dir: str,
+    output_csv: str,
+    min_market_cap: float,
+    min_ratio: float = 2.0,
+    ma_period: int = 10,
+    min_date: str = None,
+    require_bull_alignment: bool = False,
+) -> int:
+    """扫描所有历史日期，找出每日触发放量的股票，输出到单个 CSV。
+
+    每只股票读一次，用 Polars 向量化筛选所有满足 turnover > ratio * turnover_ma 的日期。
+    require_bull_alignment=True 时额外要求短期均线(5/10/20)全部在长期均线(60/120/250)上方。
+    """
+    input_path = Path(input_dir)
+    parquet_files = sorted(input_path.glob("*.parquet"))
+    if not parquet_files:
+        raise FileNotFoundError(f"No parquet files found in {input_path}")
+
+    ma_col = f"turnover_ma{ma_period}"
+    required_cols = ["date", "code", "turnover", ma_col, "market_cap"]
+    if require_bull_alignment:
+        required_cols += ["ma5", "ma10", "ma20", "ma60", "ma120", "ma250"]
+
+    chunks = []
+    for pf in parquet_files:
+        try:
+            df = pl.read_parquet(pf, columns=required_cols)
+        except Exception:
+            continue
+
+        filter_expr = (
+            pl.col(ma_col).is_not_null()
+            & (pl.col("market_cap") >= min_market_cap)
+            & (pl.col("turnover") >= min_ratio * pl.col(ma_col))
+        )
+        if require_bull_alignment:
+            short_min = pl.min_horizontal("ma5", "ma10", "ma20")
+            long_max = pl.max_horizontal("ma60", "ma120", "ma250")
+            filter_expr = filter_expr & (short_min > long_max)
+
+        df = df.filter(filter_expr)
+        if min_date:
+            df = df.filter(pl.col("date") >= min_date)
+        if df.height > 0:
+            df = df.select([
+                pl.col("date"),
+                pl.col("code"),
+                pl.col("market_cap"),
+                pl.col("turnover"),
+                pl.col(ma_col).alias(f"turnover_ma{ma_period}"),
+                (pl.col("turnover") / pl.col(ma_col)).alias("spike_ratio"),
+            ])
+            chunks.append(df)
+
+    if not chunks:
+        Path(output_csv).parent.mkdir(parents=True, exist_ok=True)
+        with open(output_csv, "w", newline="", encoding="utf-8") as f:
+            f.write("date,code,market_cap,turnover,turnover_ma10,spike_ratio\n")
+        return 0
+
+    combined = pl.concat(chunks).sort(["date", "market_cap"], descending=[False, True])
+    Path(output_csv).parent.mkdir(parents=True, exist_ok=True)
+    combined.write_csv(output_csv)
+    return combined.height
+
+
 # ============== filter_ma_converge ==============
 
 MA_WINDOWS = [5, 10, 20, 60, 120, 250]
