@@ -9,9 +9,23 @@ from quant.convert import (convert_stock_quote, convert_margin_trade, convert_ad
                            convert_fwd_return, convert_historical_stats, convert_filter_volume_spike,
                            convert_filter_ma_converge,
                            convert_fund_hs300_correlation)
+from quant.pipeline import build_stages, run_pipeline
 
 console = Console()
 cli = typer.Typer(name="quant", help="命令行量化工具")
+
+
+@cli.command()
+def refresh(
+    data_path: str = "/mnt/readonly_dataset",
+    output_dir: str = "/mnt/dataset",
+    workers: int = 2,
+) -> None:
+    """按依赖拓扑排序并行刷新全部数据集"""
+    console.print(f"[cyan]开始刷新数据集（workers={workers}）...[/cyan]")
+    stages = build_stages(data_path=data_path, output_dir=output_dir)
+    run_pipeline(stages, workers=workers, console=console)
+    console.print(f"\n[green]全部数据集刷新完成[/green]")
 
 
 @cli.command()
