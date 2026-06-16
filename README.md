@@ -322,6 +322,59 @@ uv run python -m quant.cli filter-volume-spike /mnt/dataset/stock_quote_ta /tmp/
 
 ---
 
+### filter_limit_up_pullback — 涨停回踩单日筛选
+
+| 项 | 内容 |
+|---|------|
+| 命令 | `uv run python -m quant.cli filter-limit-up-pullback <date> [options]` |
+| 输入 | `{input_dir}/{code}.parquet`（默认 stock_quote_ta） |
+| 输出 | 控制台表格 + 可选 CSV |
+| 逻辑 | 找出指定日期前 10 个交易日内涨停过、且当日已回踩到涨停前价位的创业板/科创板股票 |
+
+**筛选条件：**
+1. 创业板（300/301/302xxx）或科创板（688/689xxx）
+2. 指定日期 `market_cap ≥ min_market_cap`
+3. 指定日期前 `lookback_days` 个交易日内（窗口跨度 ≤ `max_calendar_span` 自然日，用于排除停牌），出现过涨停：`close ≥ round(prev_close × 1.20, 2)`
+4. 指定日期 `close < (1 + pullback_tolerance) × 涨停日 prev_close`
+
+窗口内多次涨停取最近一次作为锚点。
+
+**参数：**
+| 参数 | 说明 | 默认值 |
+|------|------|--------|
+| date | 指定日期（YYYY-MM-DD，位置参数） | 必填 |
+| input_dir | 输入目录 | /mnt/dataset/stock_quote_ta |
+| min_market_cap | 最小市值（单位：元） | 10000000000（100亿） |
+| lookback_days | 回看交易日数 | 10 |
+| max_calendar_span | 窗口最大自然日跨度 | 14 |
+| pullback_tolerance | 相对涨停前价位的容忍度 | 0.01（1%） |
+| output_csv | 导出 CSV 路径 | None（不导出） |
+
+**输出字段：**
+| 字段 | 含义 |
+|------|------|
+| code | 股票代码 |
+| date | 指定日期 |
+| close | 指定日期收盘价 |
+| market_cap | 指定日期总市值 |
+| zt_date | 锚点涨停日 |
+| zt_prev_close | 涨停前一交易日收盘价 |
+| pullback_pct | `close / zt_prev_close - 1` |
+
+**使用示例：**
+```bash
+# 默认参数（100亿市值、近10个交易日、回踩1%以内）
+uv run python -m quant.cli filter-limit-up-pullback 2026-06-15
+
+# 放宽到近 20 个交易日、市值 50 亿
+uv run python -m quant.cli filter-limit-up-pullback 2026-06-15 --lookback-days 20 --min-market-cap 5000000000
+
+# 导出 CSV
+uv run python -m quant.cli filter-limit-up-pullback 2026-06-15 --output-csv /tmp/lup.csv
+```
+
+---
+
 ## 策略
 
 ### momentum_strategy — 月度动量轮动

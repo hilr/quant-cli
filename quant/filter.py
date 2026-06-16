@@ -4,7 +4,9 @@
 
 - ``filter_volume_spike`` —— 扫描所有历史日期，找出每日成交额放量股票
 - ``filter_ma_converge`` —— 单日筛选均线收敛股票
+- ``filter_limit_up_pullback`` —— 单日筛选涨停后回踩的创业板/科创板股票
 """
+from datetime import datetime
 from pathlib import Path
 
 import polars as pl
@@ -155,6 +157,105 @@ def filter_ma_converge(
             "ma_max": ma_max,
             "ma_min": ma_min,
             "ma_spread": ma_max / ma_min - 1,
+        })
+
+    results.sort(key=lambda x: x["market_cap"], reverse=True)
+    return results
+
+
+# ============== filter_limit_up_pullback ==============
+
+LIMIT_UP_BOARDS = ("300", "301", "302", "688", "689")  # 创业板 + 科创板
+LIMIT_UP_RATIO = 0.20  # ChiNext / STAR 涨跌幅 20%
+
+
+def filter_limit_up_pullback(
+    input_dir: str,
+    date: str,
+    min_market_cap: float = 100e8,
+    lookback_days: int = 10,
+    max_calendar_span: int = 14,
+    pullback_tolerance: float = 0.01,
+) -> list[dict]:
+    """筛选涨停后回踩的创业板/科创板股票：
+
+    1. 创业板（300/301/302xxx）或科创板（688/689xxx）
+    2. 指定日期 market_cap >= min_market_cap
+    3. 指定日期前 lookback_days 个交易日内（窗口跨度 <= max_calendar_span 自然日，
+       用于排除停牌），出现过涨停（close >= round(prev_close * (1 + LIMIT_UP_RATIO), 2)）
+    4. 指定日期 close < (1 + pullback_tolerance) * 涨停日 prev_close
+
+    多次涨停取最近一次作为锚点。
+    """
+    input_path = Path(input_dir)
+    parquet_files = sorted(input_path.glob("*.parquet"))
+    if not parquet_files:
+        raise FileNotFoundError(f"No parquet files found in {input_path}")
+
+    required_cols = ["date", "code", "close", "prev_close", "market_cap"]
+    target_date = datetime.strptime(date, "%Y-%m-%d").date()
+
+    results = []
+
+    for pf in parquet_files:
+        code = pf.stem
+        if not code.startswith(LIMIT_UP_BOARDS):
+            continue
+
+        try:
+            df = pl.read_parquet(pf, columns=required_cols)
+        except Exception:
+            continue
+
+        df = df.sort("date")
+
+        dates_list = df["date"].to_list()
+        try:
+            target_idx = dates_list.index(date)
+        except ValueError:
+            continue
+
+        target_row = df.row(target_idx, named=True)
+        target_close = target_row["close"]
+        target_market_cap = target_row["market_cap"]
+        if target_close is None or target_market_cap is None:
+            continue
+        if target_market_cap < min_market_cap:
+            continue
+
+        window_start = max(0, target_idx - lookback_days)
+        window_df = df.slice(window_start, target_idx - window_start)
+        if window_df.height == 0:
+            continue
+
+        window_first_date = datetime.strptime(window_df["date"][0], "%Y-%m-%d").date()
+        if (target_date - window_first_date).days > max_calendar_span:
+            continue
+
+        zt_threshold = (pl.col("prev_close") * (1 + LIMIT_UP_RATIO)).round(2)
+        zt_rows = window_df.with_columns(
+            (pl.col("close") >= zt_threshold).alias("_is_zt")
+        ).filter(pl.col("_is_zt"))
+        if zt_rows.height == 0:
+            continue
+
+        zt_row = zt_rows.row(-1, named=True)
+        zt_date = zt_row["date"]
+        zt_prev_close = zt_row["prev_close"]
+        if zt_prev_close is None or zt_prev_close <= 0:
+            continue
+
+        if target_close >= (1 + pullback_tolerance) * zt_prev_close:
+            continue
+
+        results.append({
+            "code": code,
+            "date": date,
+            "close": target_close,
+            "market_cap": target_market_cap,
+            "zt_date": zt_date,
+            "zt_prev_close": zt_prev_close,
+            "pullback_pct": target_close / zt_prev_close - 1,
         })
 
     results.sort(key=lambda x: x["market_cap"], reverse=True)
