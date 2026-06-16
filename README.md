@@ -329,13 +329,12 @@ uv run python -m quant.cli filter-volume-spike /mnt/dataset/stock_quote_ta /tmp/
 | 命令 | `uv run python -m quant.cli filter-limit-up-pullback <date> [options]` |
 | 输入 | `{input_dir}/{code}.parquet`（默认 stock_quote_ta） |
 | 输出 | 控制台表格 + 可选 CSV |
-| 逻辑 | 找出指定日期前 10 个交易日内涨停过、且当日已回踩到涨停前价位的创业板/科创板股票 |
+| 逻辑 | 找出指定日期前 10 个交易日内涨停过、且当日已回踩到涨停前价位的股票 |
 
 **筛选条件：**
-1. 创业板（300/301/302xxx）或科创板（688/689xxx）
-2. 指定日期 `market_cap ≥ min_market_cap`
-3. 指定日期前 `lookback_days` 个交易日内（窗口跨度 ≤ `max_calendar_span` 自然日，用于排除停牌），出现过涨停：`close ≥ round(prev_close × 1.19, 2)`
-4. 指定日期 `close < (1 + pullback_tolerance) × 涨停日 prev_close`
+1. 指定日期 `market_cap ≥ min_market_cap`
+2. 指定日期前 `lookback_days` 个交易日内（窗口跨度 ≤ `max_calendar_span` 自然日，用于排除停牌），出现过涨停：`close ≥ round(prev_close × 1.099, 2)`
+3. 指定日期 `close < (1 + pullback_tolerance) × 涨停日 prev_close`
 
 窗口内多次涨停取最近一次作为锚点。
 

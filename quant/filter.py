@@ -4,7 +4,7 @@
 
 - ``filter_volume_spike`` —— 扫描所有历史日期，找出每日成交额放量股票
 - ``filter_ma_converge`` —— 单日筛选均线收敛股票
-- ``filter_limit_up_pullback`` —— 单日筛选涨停后回踩的创业板/科创板股票
+- ``filter_limit_up_pullback`` —— 单日筛选涨停后回踩的股票
 """
 from datetime import datetime
 from pathlib import Path
@@ -165,9 +165,8 @@ def filter_ma_converge(
 
 # ============== filter_limit_up_pullback ==============
 
-LIMIT_UP_BOARDS = ("300", "301", "302", "688", "689")  # 创业板 + 科创板
-# ChiNext / STAR 涨跌幅 20%，但用 1.19 作为检测阈值更宽容（兼顾 prev_close 取整误差）
-LIMIT_UP_RATIO = 0.19
+# 涨停检测阈值：主板 10%，用 1.099 兼顾 prev_close 取整误差
+LIMIT_UP_RATIO = 0.099
 
 
 def filter_limit_up_pullback(
@@ -178,13 +177,12 @@ def filter_limit_up_pullback(
     max_calendar_span: int = 14,
     pullback_tolerance: float = 0.01,
 ) -> list[dict]:
-    """筛选涨停后回踩的创业板/科创板股票：
+    """筛选涨停后回踩的股票：
 
-    1. 创业板（300/301/302xxx）或科创板（688/689xxx）
-    2. 指定日期 market_cap >= min_market_cap
-    3. 指定日期前 lookback_days 个交易日内（窗口跨度 <= max_calendar_span 自然日，
-       用于排除停牌），出现过涨停（close >= round(prev_close * 1.19, 2)）
-    4. 指定日期 close < (1 + pullback_tolerance) * 涨停日 prev_close
+    1. 指定日期 market_cap >= min_market_cap
+    2. 指定日期前 lookback_days 个交易日内（窗口跨度 <= max_calendar_span 自然日，
+       用于排除停牌），出现过涨停（close >= round(prev_close * 1.099, 2)）
+    3. 指定日期 close < (1 + pullback_tolerance) * 涨停日 prev_close
 
     多次涨停取最近一次作为锚点。
     """
@@ -200,8 +198,6 @@ def filter_limit_up_pullback(
 
     for pf in parquet_files:
         code = pf.stem
-        if not code.startswith(LIMIT_UP_BOARDS):
-            continue
 
         try:
             df = pl.read_parquet(pf, columns=required_cols)

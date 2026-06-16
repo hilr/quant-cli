@@ -294,7 +294,7 @@ def filter_limit_up_pullback(
     pullback_tolerance: float = 0.01,
     output_csv: str = None,
 ) -> None:
-    """筛选涨停回踩：创业板/科创板 + 市值达标 + 近期涨停 + 回踩到涨停前价位"""
+    """筛选涨停回踩：市值达标 + 近期涨停 + 回踩到涨停前价位"""
     console.print(f"[cyan]筛选涨停回踩股票 ({date})...[/cyan]")
     results = run_filter_limit_up_pullback(
         input_dir=input_dir, date=date,
