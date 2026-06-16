@@ -332,9 +332,10 @@ uv run python -m quant.cli filter-volume-spike /mnt/dataset/stock_quote_ta /tmp/
 | 逻辑 | 找出指定日期前 10 个交易日内涨停过、且当日已回踩到涨停前价位的股票 |
 
 **筛选条件：**
-1. 指定日期 `market_cap ≥ min_market_cap`
-2. 指定日期前 `lookback_days` 个交易日内（窗口跨度 ≤ `max_calendar_span` 自然日，用于排除停牌），出现过涨停：`close ≥ round(prev_close × 1.099, 2)`
-3. 指定日期 `close < (1 + pullback_tolerance) × 涨停日 prev_close`
+1. 非 ST 股票（从当天原始行情 `finance_sina/stock_quote/{date}.csv` 的 name 字段判断）
+2. 指定日期 `market_cap ≥ min_market_cap`
+3. 指定日期前 `lookback_days` 个交易日内（窗口跨度 ≤ `max_calendar_span` 自然日，用于排除停牌），出现过涨停：`close ≥ round(prev_close × 1.099, 2)`
+4. 指定日期 `close < (1 + pullback_tolerance) × 涨停日 prev_close`
 
 窗口内多次涨停取最近一次作为锚点。
 

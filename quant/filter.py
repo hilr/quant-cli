@@ -179,10 +179,11 @@ def filter_limit_up_pullback(
 ) -> list[dict]:
     """筛选涨停后回踩的股票：
 
-    1. 指定日期 market_cap >= min_market_cap
-    2. 指定日期前 lookback_days 个交易日内（窗口跨度 <= max_calendar_span 自然日，
+    1. 非 ST 股票
+    2. 指定日期 market_cap >= min_market_cap
+    3. 指定日期前 lookback_days 个交易日内（窗口跨度 <= max_calendar_span 自然日，
        用于排除停牌），出现过涨停（close >= round(prev_close * 1.099, 2)）
-    3. 指定日期 close < (1 + pullback_tolerance) * 涨停日 prev_close
+    4. 指定日期 close < (1 + pullback_tolerance) * 涨停日 prev_close
 
     多次涨停取最近一次作为锚点。
     """
@@ -194,10 +195,23 @@ def filter_limit_up_pullback(
     required_cols = ["date", "code", "close", "prev_close", "market_cap"]
     target_date = datetime.strptime(date, "%Y-%m-%d").date()
 
+    # 读取当天原始行情获取股票名称（用于过滤 ST）
+    raw_csv = input_path.parent.parent / "readonly_dataset" / "finance_sina" / "stock_quote" / f"{date}.csv"
+    if raw_csv.exists():
+        raw_df = pl.read_csv(raw_csv, columns=["code", "name"])
+        raw_df = raw_df.with_columns(pl.col("code").cast(pl.String).str.zfill(6))
+        st_codes = set(raw_df.filter(
+            pl.col("name").str.to_uppercase().str.contains("ST")
+        )["code"].to_list())
+    else:
+        st_codes = set()
+
     results = []
 
     for pf in parquet_files:
         code = pf.stem
+        if code in st_codes:
+            continue
 
         try:
             df = pl.read_parquet(pf, columns=required_cols)
