@@ -91,12 +91,14 @@
 均线（收盘价）：
 | 字段 | 含义 |
 |------|------|
-| ma5, ma10, ma20, ma60, ma120, ma250 | 收盘价N日均线 |
+| ma5, ma10, ma20, ma60, ma120, ma250 | 收盘价N日简单移动平均（SMA） |
+| ema5, ema10, ema20, ema60, ema120, ema250 | 收盘价N日指数移动平均（EMA，α=2/(N+1)） |
 
 均线（成交额）：
 | 字段 | 含义 |
 |------|------|
-| turnover_ma5, turnover_ma10, turnover_ma20, turnover_ma60, turnover_ma120, turnover_ma250 | 成交额N日均线 |
+| turnover_ma5, turnover_ma10, turnover_ma20, turnover_ma60, turnover_ma120, turnover_ma250 | 成交额N日SMA |
+| turnover_ema5, turnover_ema10, turnover_ema20, turnover_ema60, turnover_ema120, turnover_ema250 | 成交额N日EMA |
 
 收益率：
 | 字段 | 含义 |
