@@ -10,6 +10,7 @@ OUTPUT_DATA_PATH = "/mnt/dataset"
 # ============== TA 窗口常量 ==============
 
 TA_MA_WINDOWS = [5, 10, 20, 60, 120, 250]
+TA_EMA_WINDOWS = [5, 10, 20, 60, 120, 250]
 TA_BOLL_PERIODS = [20, 60]
 TA_HIST_PERIODS = [1000, 750, 500, 250, 120, 60, 20]
 TA_TURNOVER_STD_WINDOWS = [10, 20, 40]
@@ -273,6 +274,17 @@ def _add_ma(df: pl.DataFrame, windows: list[int]) -> pl.DataFrame:
     ])
 
 
+def _add_ema(df: pl.DataFrame, windows: list[int]) -> pl.DataFrame:
+    """指数移动平均：α = 2/(N+1)，adjust=False 走传统递推公式。"""
+    return df.with_columns([
+        pl.col("close").ewm_mean(span=w, adjust=False, min_samples=0).alias(f"ema{w}")
+        for w in windows
+    ] + [
+        pl.col("turnover").ewm_mean(span=w, adjust=False, min_samples=0).alias(f"turnover_ema{w}")
+        for w in windows
+    ])
+
+
 def _add_volatility(df: pl.DataFrame, std_windows: list[int], turnover_std_windows: list[int]) -> pl.DataFrame:
     df = df.with_columns([
         ((pl.col("close") - pl.col("prev_close")) / pl.col("prev_close")).alias("return_1d"),
@@ -354,6 +366,7 @@ def convert_ta(
         input_dir, output_dir,
         indicators=[
             lambda df: _add_ma(df, TA_MA_WINDOWS),
+            lambda df: _add_ema(df, TA_EMA_WINDOWS),
             lambda df: _add_volatility(df, TA_VOLATILITY_STD_WINDOWS, TA_TURNOVER_STD_WINDOWS),
             lambda df: _add_boll(df, TA_BOLL_PERIODS),
             lambda df: _add_hist(df, TA_HIST_PERIODS),
@@ -417,6 +430,7 @@ def convert_index_ta(
         input_dir, output_dir,
         indicators=[
             lambda df: _add_ma(df, TA_MA_WINDOWS),
+            lambda df: _add_ema(df, TA_EMA_WINDOWS),
             lambda df: _add_volatility(df, TA_VOLATILITY_STD_WINDOWS, TA_TURNOVER_STD_WINDOWS),
             lambda df: _add_boll(df, TA_BOLL_PERIODS),
             lambda df: _add_hist(df, TA_HIST_PERIODS),
