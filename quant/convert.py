@@ -578,7 +578,7 @@ def convert_filter_volume_spike(
     min_market_cap: float,
     lookback_days: int = 5,
     min_ratio: float = 2.0,
-    ma_period: int = 10,
+    ma_period: int = 20,
     min_date: str = None,
     min_zt_days: int = 0,
     input_dir_adj: str = None,
@@ -680,7 +680,7 @@ def convert_filter_volume_spike_history(
     output_csv: str,
     min_market_cap: float,
     min_ratio: float = 2.0,
-    ma_period: int = 10,
+    ma_period: int = 20,
     min_date: str = None,
     require_bull_alignment: bool = False,
 ) -> int:

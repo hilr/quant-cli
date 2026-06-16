@@ -338,7 +338,7 @@ uv run python -m quant.cli filter-volume-spike /mnt/dataset/stock_quote_ta 10000
 | output_csv | 输出 CSV 文件路径 | 必填 |
 | min_market_cap | 最小市值（单位：元） | 必填（200亿=20000000000） |
 | min_ratio | 放量倍数（相对N日均线） | 2.0 |
-| ma_period | 均线周期（基准） | 10 |
+| ma_period | 均线周期（基准） | 20 |
 | min_date | 起始日期（含，YYYY-MM-DD） | None（全历史） |
 | require_bull_alignment | 多头排列：ma5/10/20 全部在 ma60/120/250 上方 | False |
 
@@ -349,8 +349,8 @@ uv run python -m quant.cli filter-volume-spike /mnt/dataset/stock_quote_ta 10000
 | code | 股票代码 |
 | market_cap | 当日总市值 |
 | turnover | 当日成交额 |
-| turnover_ma10 | 10日成交额均线（基准） |
-| spike_ratio | 放量倍数（turnover / turnover_ma10） |
+| turnover_ma20 | 20日成交额均线（基准） |
+| spike_ratio | 放量倍数（turnover / turnover_ma20） |
 
 **使用示例：**
 ```bash
