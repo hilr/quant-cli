@@ -368,6 +368,28 @@ uv run python -m quant.cli filter-volume-spike-history /mnt/dataset/stock_quote_
 
 ---
 
+## 策略
+
+### momentum_strategy — 月度动量轮动
+
+每月最后一个交易日，比较 CSI300/中证500/创业板50 三指数当月收益，选最强者持有到下个月末。
+
+```bash
+uv run python -m quant.cli momentum-strategy \
+    --input-dir /mnt/dataset/index_quote_history \
+    --output-csv /mnt/dataset/strategy_momentum.csv \
+    --output-png /mnt/dataset/strategy_momentum.png
+```
+
+输出：
+
+- `output_csv`：每月明细（持仓指数、当月收益、累计净值）
+- `output_png`：策略与三指数 B&H 的 NAV 曲线（对数轴）
+
+回测区间约 12 年（2014 至今）。纯数学模拟，不考虑交易成本、滑点、税费。
+
+---
+
 ## 数据流全景
 
 ```
