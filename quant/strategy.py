@@ -48,12 +48,14 @@ def run_momentum_strategy(
     output_csv: str,
     output_png: str | None = None,
     indices: dict[str, str] | None = None,
+    cash_when_all_negative: bool = False,
 ) -> dict:
     """月度动量轮动策略：每月末选当月最强指数持有
 
     策略逻辑：
       - 每月最后一个交易日，比较各指数本月收益（上月末→本月末）
       - 选最强者持有到下个月末
+      - 若 ``cash_when_all_negative=True``：当上月三个指数收益全部为负时本月空仓
       - 纯数学模拟，不考虑交易成本
 
     Returns:
@@ -84,11 +86,33 @@ def run_momentum_strategy(
         .agg(pl.col("idx").first().alias("winner_idx"))
     )
     df_m = df_m.join(winner, on="date", how="left")
-    df_m = df_m.with_columns(pl.col("winner_idx").shift(1).alias("held_idx"))
 
-    # 查表得到策略本月收益（held_idx 决定本月持仓）
+    if cash_when_all_negative:
+        all_neg = pl.lit(True)
+        for n in names:
+            all_neg = all_neg & (pl.col(f"{n}_ret") < 0)
+        df_m = df_m.with_columns(all_neg.alias("all_negative"))
+        # 当上月三个指数全为负时，本月空仓（held_idx = "CASH"）
+        df_m = df_m.with_columns(
+            pl.when(pl.col("all_negative").shift(1))
+            .then(pl.lit("CASH"))
+            .otherwise(pl.col("winner_idx").shift(1))
+            .alias("held_idx")
+        )
+    else:
+        df_m = df_m.with_columns(pl.col("winner_idx").shift(1).alias("held_idx"))
+
+    # 查表得到策略本月收益（held_idx 决定本月持仓；CASH = 0）
     records = df_m.to_dicts()
-    strat_ret = [r.get(f"{r['held_idx']}_ret") if r.get("held_idx") else None for r in records]
+    strat_ret = []
+    for r in records:
+        h = r.get("held_idx")
+        if h is None:
+            strat_ret.append(None)
+        elif h == "CASH":
+            strat_ret.append(0.0)
+        else:
+            strat_ret.append(r.get(f"{h}_ret"))
     df_m = df_m.with_columns(pl.Series(name="strat_ret", values=strat_ret))
 
     df_eval = df_m.filter(pl.col("strat_ret").is_not_null()).sort("date")

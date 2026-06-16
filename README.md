@@ -378,8 +378,11 @@ uv run python -m quant.cli filter-volume-spike-history /mnt/dataset/stock_quote_
 uv run python -m quant.cli momentum-strategy \
     --input-dir /mnt/dataset/index_quote_history \
     --output-csv /mnt/dataset/strategy_momentum.csv \
-    --output-png /mnt/dataset/strategy_momentum.png
+    --output-png /mnt/dataset/strategy_momentum.png \
+    --cash-when-all-negative
 ```
+
+可选 `--cash-when-all-negative`：当上月三个指数收益全部为负时，本月空仓（收益记为 0）。
 
 输出：
 

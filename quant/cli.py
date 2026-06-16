@@ -349,13 +349,17 @@ def momentum_strategy(
     input_dir: str = "/mnt/dataset/index_quote_history",
     output_csv: str = None,
     output_png: str = None,
+    cash_when_all_negative: bool = False,
 ) -> None:
     """月度动量轮动策略：CSI300/CSI500/创业板50 每月末选当月最强者持有"""
     if output_csv is None:
         console.print("[red]必须提供 --output-csv[/red]")
         raise typer.Exit(1)
     console.print(f"[cyan]运行月度动量轮动策略...[/cyan]")
-    stats = run_momentum_strategy(input_dir=input_dir, output_csv=output_csv, output_png=output_png)
+    stats = run_momentum_strategy(
+        input_dir=input_dir, output_csv=output_csv, output_png=output_png,
+        cash_when_all_negative=cash_when_all_negative,
+    )
 
     table = Table(title="策略统计")
     table.add_column("指标", style="cyan")
