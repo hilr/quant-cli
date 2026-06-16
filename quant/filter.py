@@ -166,7 +166,8 @@ def filter_ma_converge(
 # ============== filter_limit_up_pullback ==============
 
 LIMIT_UP_BOARDS = ("300", "301", "302", "688", "689")  # 创业板 + 科创板
-LIMIT_UP_RATIO = 0.20  # ChiNext / STAR 涨跌幅 20%
+# ChiNext / STAR 涨跌幅 20%，但用 1.19 作为检测阈值更宽容（兼顾 prev_close 取整误差）
+LIMIT_UP_RATIO = 0.19
 
 
 def filter_limit_up_pullback(
@@ -182,7 +183,7 @@ def filter_limit_up_pullback(
     1. 创业板（300/301/302xxx）或科创板（688/689xxx）
     2. 指定日期 market_cap >= min_market_cap
     3. 指定日期前 lookback_days 个交易日内（窗口跨度 <= max_calendar_span 自然日，
-       用于排除停牌），出现过涨停（close >= round(prev_close * (1 + LIMIT_UP_RATIO), 2)）
+       用于排除停牌），出现过涨停（close >= round(prev_close * 1.19, 2)）
     4. 指定日期 close < (1 + pullback_tolerance) * 涨停日 prev_close
 
     多次涨停取最近一次作为锚点。

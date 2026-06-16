@@ -334,7 +334,7 @@ uv run python -m quant.cli filter-volume-spike /mnt/dataset/stock_quote_ta /tmp/
 **筛选条件：**
 1. 创业板（300/301/302xxx）或科创板（688/689xxx）
 2. 指定日期 `market_cap ≥ min_market_cap`
-3. 指定日期前 `lookback_days` 个交易日内（窗口跨度 ≤ `max_calendar_span` 自然日，用于排除停牌），出现过涨停：`close ≥ round(prev_close × 1.20, 2)`
+3. 指定日期前 `lookback_days` 个交易日内（窗口跨度 ≤ `max_calendar_span` 自然日，用于排除停牌），出现过涨停：`close ≥ round(prev_close × 1.19, 2)`
 4. 指定日期 `close < (1 + pullback_tolerance) × 涨停日 prev_close`
 
 窗口内多次涨停取最近一次作为锚点。
