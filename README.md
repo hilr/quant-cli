@@ -277,56 +277,11 @@
 
 ## 筛选功能
 
-### filter_volume_spike — 放量股票筛选
+### filter_volume_spike — 放量股票批量筛选
 
 | 项 | 内容 |
 |---|------|
-| 命令 | `uv run python -m quant.cli filter-volume-spike <input_dir> <min_market_cap> [options]` |
-| 输入 | `{input_dir}/{code}.parquet`（stock_quote_ta） |
-| 输出 | 控制台表格（可选 CSV 文件） |
-| 筛选条件 | 市值 > min_market_cap，过去 N 日内有成交额 > M 倍 20日均线 |
-
-**参数：**
-| 参数 | 说明 | 默认值 |
-|------|------|--------|
-| input_dir | 输入目录（stock_quote_ta） | 必填 |
-| min_market_cap | 最小市值（单位：元） | 必填（100亿=10000000000） |
-| lookback-days | 回看交易日数 | 10 |
-| volume-multiplier | 放量倍数 | 2.0 |
-| output-csv | 输出 CSV 文件路径 | None（仅控制台显示） |
-
-**使用示例：**
-```bash
-# 筛选市值100亿以上，过去10日内有2倍放量的股票
-uv run python -m quant.cli filter-volume-spike /mnt/dataset/stock_quote_ta 10000000000
-
-# 自定义参数
-uv run python -m quant.cli filter-volume-spike /mnt/dataset/stock_quote_ta 50000000000 --lookback-days 15 --volume-multiplier 3.0
-
-# 导出结果
-uv run python -m quant.cli filter-volume-spike /mnt/dataset/stock_quote_ta 10000000000 --output-csv /tmp/volume_spike.csv
-```
-
-**输出示例：**
-```
-╒═════════╤══════════╤════════════╤════════════╤═════════════╤══════════════╤═══════════════╕
-│ 代码    │ 名称     │ 市值       │ 最新日期   │ 成交额     │ 20日均线   │ 放量日期    │ 放量倍数   │
-╞═════════╪══════════╪════════════╪════════════╪═════════════╪══════════════╪═══════════════╡
-│ 000001  │ 平安银行  │ 250亿      │ 2024-06-07 │ 500M        │ 200M        │ 2024-06-03   │ 2.5x       │
-└─────────┴──────────┴─────────────┴────────────┴─────────────┴──────────────┴─────────────┘
-
-放量股票筛选结果 (共 156 只)
-```
-
-**注意：** 数据集只包含交易日数据，`lookback-days` 参数使用交易日数而非自然日。14个自然日约等于10个交易日。
-
----
-
-### filter_volume_spike_history — 历史放量批量筛选
-
-| 项 | 内容 |
-|---|------|
-| 命令 | `uv run python -m quant.cli filter-volume-spike-history <input_dir> <output_csv> <min_market_cap> [options]` |
+| 命令 | `uv run python -m quant.cli filter-volume-spike <input_dir> <output_csv> <min_market_cap> [options]` |
 | 输入 | `{input_dir}/{code}.parquet`（stock_quote_ta） |
 | 输出 | 单个 CSV 文件，每行一条放量记录 |
 | 逻辑 | 用 Polars 向量化筛选所有满足 `turnover ≥ min_ratio × turnover_ma{ma_period}` 的日期 |
@@ -338,9 +293,8 @@ uv run python -m quant.cli filter-volume-spike /mnt/dataset/stock_quote_ta 10000
 | output_csv | 输出 CSV 文件路径 | 必填 |
 | min_market_cap | 最小市值（单位：元） | 必填（200亿=20000000000） |
 | min_ratio | 放量倍数（相对N日均线） | 2.0 |
-| ma_period | 均线周期（基准） | 10 |
+| ma_period | 均线周期（基准） | 20 |
 | min_date | 起始日期（含，YYYY-MM-DD） | None（全历史） |
-| require_bull_alignment | 多头排列：ma5/10/20 全部在 ma60/120/250 上方 | False |
 
 **CSV 字段：**
 | 字段 | 含义 |
@@ -349,19 +303,19 @@ uv run python -m quant.cli filter-volume-spike /mnt/dataset/stock_quote_ta 10000
 | code | 股票代码 |
 | market_cap | 当日总市值 |
 | turnover | 当日成交额 |
-| turnover_ma10 | 10日成交额均线（基准） |
-| spike_ratio | 放量倍数（turnover / turnover_ma10） |
+| turnover_ma20 | 20日成交额均线（基准） |
+| spike_ratio | 放量倍数（turnover / turnover_ma20） |
 
 **使用示例：**
 ```bash
 # 筛选市值200亿以上，2倍放量
-uv run python -m quant.cli filter-volume-spike-history /mnt/dataset/stock_quote_ta /tmp/out.csv 20000000000
+uv run python -m quant.cli filter-volume-spike /mnt/dataset/stock_quote_ta /tmp/out.csv 20000000000
 
-# 加多头排列过滤（ma5/10/20 全在 ma60/120/250 上方）
-uv run python -m quant.cli filter-volume-spike-history /mnt/dataset/stock_quote_ta /tmp/out.csv 20000000000 --require-bull-alignment
+# 只要 2026 年的记录
+uv run python -m quant.cli filter-volume-spike /mnt/dataset/stock_quote_ta /tmp/out.csv 20000000000 --min-date 2026-01-01
 
-# 改用20日均线作基准，3倍阈值
-uv run python -m quant.cli filter-volume-spike-history /mnt/dataset/stock_quote_ta /tmp/out.csv 20000000000 --ma-period 20 --min-ratio 3.0
+# 改用 60 日均线作基准，3 倍阈值
+uv run python -m quant.cli filter-volume-spike /mnt/dataset/stock_quote_ta /tmp/out.csv 20000000000 --ma-period 60 --min-ratio 3.0
 ```
 
 **性能：** 单进程下全市场（6000+股票）扫描所有历史日期约耗时 30-60 秒。

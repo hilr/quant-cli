@@ -6,10 +6,9 @@ from rich.table import Table
 from quant.convert import (convert_stock_quote, convert_margin_trade, convert_adjust, convert_margin_trade_daily,
                            convert_ta, convert_boll, convert_fund_shares, convert_fund_quote, convert_fund_adjust,
                            convert_fund_flow, convert_index_quote, convert_index_ta, convert_index_boll,
-                           convert_fwd_return, convert_historical_stats, convert_filter_volume_spike,
-                           convert_filter_volume_spike_history,
-                           convert_filter_ma_converge,
+                           convert_fwd_return, convert_historical_stats,
                            convert_fund_hs300_correlation)
+from quant.filter import filter_volume_spike as run_filter_volume_spike, filter_ma_converge as run_filter_ma_converge
 from quant.pipeline import build_stages, run_pipeline
 
 console = Console()
@@ -213,77 +212,18 @@ def historical_stats(
 @cli.command()
 def filter_volume_spike(
     input_dir: str,
-    min_market_cap: float,
-    lookback_days: int = 5,
-    min_ratio: float = 2.0,
-    ma_period: int = 10,
-    min_date: str = None,
-    min_zt_days: int = 0,
-    input_dir_adj: str = None,
-    output_csv: str = None,
-) -> None:
-    """筛选放量股票：市值达标 + 成交额放量 + 涨停天数"""
-    console.print(f"[cyan]筛选放量股票...[/cyan]")
-    results = convert_filter_volume_spike(input_dir=input_dir, min_market_cap=min_market_cap,
-                                          lookback_days=lookback_days, min_ratio=min_ratio,
-                                          ma_period=ma_period, min_date=min_date, min_zt_days=min_zt_days,
-                                          input_dir_adj=input_dir_adj)
-
-    if not results:
-        console.print("[yellow]没有找到符合条件的股票[/yellow]")
-        return
-
-    # 显示表格
-    table = Table(title=f"放量股票筛选结果 (共 {len(results)} 只)")
-    table.add_column("代码", style="cyan")
-    table.add_column("市值", style="yellow")
-    table.add_column("最新日期", style="blue")
-    table.add_column("放量日期", style="red")
-    table.add_column("放量倍数", style="bright_red")
-    table.add_column("涨停天数", style="green")
-
-    for r in results[:100]:
-        table.add_row(
-            r["code"],
-            f"{r['market_cap']/1e8:.0f}亿",
-            r["latest_date"],
-            r["spike_date"],
-            f"{r['spike_ratio']:.2f}x",
-            f"{r['zt_days']}天",
-        )
-
-    console.print(table)
-
-    if len(results) > 100:
-        console.print(f"[dim]... 还有 {len(results) - 100} 只股票未显示[/dim]")
-
-    # 导出 CSV
-    if output_csv:
-        import csv
-        with open(output_csv, "w", newline="", encoding="utf-8") as f:
-            writer = csv.DictWriter(f, fieldnames=results[0].keys())
-            writer.writeheader()
-            writer.writerows(results)
-        console.print(f"[green]结果已导出: {output_csv}[/green]")
-
-
-@cli.command()
-def filter_volume_spike_history(
-    input_dir: str,
     output_csv: str,
     min_market_cap: float,
     min_ratio: float = 2.0,
-    ma_period: int = 10,
+    ma_period: int = 20,
     min_date: str = None,
-    require_bull_alignment: bool = False,
 ) -> None:
     """扫描所有历史日期，批量筛每日触发放量的股票，输出单个 CSV"""
     console.print(f"[cyan]批量筛选历史放量股票...[/cyan]")
-    count = convert_filter_volume_spike_history(
+    count = run_filter_volume_spike(
         input_dir=input_dir, output_csv=output_csv,
         min_market_cap=min_market_cap, min_ratio=min_ratio,
         ma_period=ma_period, min_date=min_date,
-        require_bull_alignment=require_bull_alignment,
     )
     console.print(f"[green]完成! 共 {count} 条放量记录 → {output_csv}[/green]")
 
@@ -299,7 +239,7 @@ def filter_ma_converge(
 ) -> None:
     """筛选均线收敛股票：市值达标 + 非ST + 成交额达标 + 均线收敛"""
     console.print(f"[cyan]筛选均线收敛股票 ({date})...[/cyan]")
-    results = convert_filter_ma_converge(
+    results = run_filter_ma_converge(
         ma_dir=input_dir, date=date,
         min_market_cap=min_market_cap, min_turnover=min_turnover,
         max_ma_spread=max_ma_spread,
