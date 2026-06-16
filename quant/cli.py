@@ -10,6 +10,7 @@ from quant.convert import (convert_stock_quote, convert_margin_trade, convert_ad
                            convert_fund_hs300_correlation)
 from quant.filter import filter_volume_spike as run_filter_volume_spike, filter_ma_converge as run_filter_ma_converge
 from quant.pipeline import build_stages, run_pipeline
+from quant.strategy import run_momentum_strategy, run_ma_crossover_strategy
 
 console = Console()
 cli = typer.Typer(name="quant", help="命令行量化工具")
@@ -281,6 +282,80 @@ def filter_ma_converge(
             writer.writeheader()
             writer.writerows(results)
         console.print(f"[green]结果已导出: {output_csv}[/green]")
+
+
+@cli.command()
+def momentum_strategy(
+    input_dir: str = "/mnt/dataset/index_quote_history",
+    output_csv: str = None,
+    output_png: str = None,
+    cash_when_all_negative: bool = False,
+) -> None:
+    """月度动量轮动策略：CSI300/CSI500/创业板50 每月末选当月最强者持有"""
+    if output_csv is None:
+        console.print("[red]必须提供 --output-csv[/red]")
+        raise typer.Exit(1)
+    console.print(f"[cyan]运行月度动量轮动策略...[/cyan]")
+    stats = run_momentum_strategy(
+        input_dir=input_dir, output_csv=output_csv, output_png=output_png,
+        cash_when_all_negative=cash_when_all_negative,
+    )
+
+    table = Table(title="策略统计")
+    table.add_column("指标", style="cyan")
+    table.add_column("值", style="yellow")
+    for k, v in stats.items():
+        if isinstance(v, float):
+            if k in ("total_return", "cagr", "annual_vol", "max_drawdown", "time_in_market"):
+                table.add_row(k, f"{v:.2%}")
+            elif k == "sharpe":
+                table.add_row(k, f"{v:.2f}")
+            else:
+                table.add_row(k, f"{v:.4f}")
+        else:
+            table.add_row(k, str(v))
+    console.print(table)
+    console.print(f"[green]明细: {output_csv}[/green]")
+    if output_png:
+        console.print(f"[green]NAV 曲线: {output_png}[/green]")
+
+
+@cli.command()
+def ma_crossover_strategy(
+    input_dir: str = "/mnt/dataset/index_quote_history",
+    index_code: str = "000300",
+    fast_window: int = 5,
+    slow_window: int = 60,
+    output_csv: str = None,
+    output_png: str = None,
+) -> None:
+    """双均线突破策略：快线上穿慢线买入，跌破卖出"""
+    if output_csv is None:
+        console.print("[red]必须提供 --output-csv[/red]")
+        raise typer.Exit(1)
+    console.print(f"[cyan]运行双均线突破策略 ({index_code}, {fast_window}/{slow_window})...[/cyan]")
+    stats = run_ma_crossover_strategy(
+        input_dir=input_dir, output_csv=output_csv, output_png=output_png,
+        index_code=index_code, fast_window=fast_window, slow_window=slow_window,
+    )
+
+    table = Table(title="策略统计")
+    table.add_column("指标", style="cyan")
+    table.add_column("值", style="yellow")
+    for k, v in stats.items():
+        if isinstance(v, float):
+            if k in ("total_return", "cagr", "annual_vol", "max_drawdown", "time_in_market"):
+                table.add_row(k, f"{v:.2%}")
+            elif k == "sharpe":
+                table.add_row(k, f"{v:.2f}")
+            else:
+                table.add_row(k, f"{v:.4f}")
+        else:
+            table.add_row(k, str(v))
+    console.print(table)
+    console.print(f"[green]明细: {output_csv}[/green]")
+    if output_png:
+        console.print(f"[green]NAV 曲线: {output_png}[/green]")
 
 
 if __name__ == "__main__":

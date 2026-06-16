@@ -322,6 +322,55 @@ uv run python -m quant.cli filter-volume-spike /mnt/dataset/stock_quote_ta /tmp/
 
 ---
 
+## 策略
+
+### momentum_strategy — 月度动量轮动
+
+每月最后一个交易日，比较 CSI300/中证500/创业板50 三指数当月收益，选最强者持有到下个月末。
+
+```bash
+uv run python -m quant.cli momentum-strategy \
+    --input-dir /mnt/dataset/index_quote_history \
+    --output-csv /mnt/dataset/strategy_momentum.csv \
+    --output-png /mnt/dataset/strategy_momentum.png \
+    --cash-when-all-negative
+```
+
+可选 `--cash-when-all-negative`：当上月三个指数收益全部为负时，本月空仓（收益记为 0）。
+
+输出：
+
+- `output_csv`：每月明细（持仓指数、当月收益、累计净值）
+- `output_png`：策略与三指数 B&H 的 NAV 曲线（对数轴）
+
+回测区间约 12 年（2014 至今）。纯数学模拟，不考虑交易成本、滑点、税费。
+
+### ma_crossover_strategy — 双均线突破
+
+基于单一指数的双均线突破策略：快线上穿慢线时持仓，跌破时空仓。使用 T-1 日信号决定 T 日持仓，避免未来函数。
+
+```bash
+uv run python -m quant.cli ma-crossover-strategy \
+    --input-dir /mnt/dataset/index_quote_history \
+    --index-code 000300 \
+    --fast-window 5 \
+    --slow-window 60 \
+    --output-csv /mnt/dataset/strategy_ma_cross.csv \
+    --output-png /mnt/dataset/strategy_ma_cross.png
+```
+
+参数：
+
+- `--index-code`：指数代码（默认 000300 = CSI300）
+- `--fast-window` / `--slow-window`：快慢均线窗口（默认 5 / 60）
+
+输出：
+
+- `output_csv`：每日明细（收盘价、快慢均线、持仓、收益、累计净值）
+- `output_png`：策略与指数 B&H 的 NAV 曲线，绿色阴影为持仓区间
+
+---
+
 ## 数据流全景
 
 ```
