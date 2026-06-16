@@ -175,3 +175,123 @@ def run_momentum_strategy(
         plt.close(fig)
 
     return stats
+
+
+def run_ma_crossover_strategy(
+    input_dir: str,
+    output_csv: str,
+    output_png: str | None = None,
+    index_code: str = "000300",
+    fast_window: int = 5,
+    slow_window: int = 60,
+) -> dict:
+    """双均线突破策略：快线上穿慢线买入，跌破卖出
+
+    策略逻辑：
+      - 计算 fast_window / slow_window 日均线
+      - 当 fast_ma > slow_ma 时持仓指数，否则空仓
+      - 使用 T-1 日信号决定 T 日持仓（避免未来函数）
+      - 纯数学模拟，不考虑交易成本
+
+    Returns:
+        统计指标字典（总收益、年化、波动、Sharpe、最大回撤、持仓占比、交易次数）
+    """
+    import matplotlib.pyplot as plt
+    import matplotlib.dates as mdates
+
+    fp = Path(input_dir) / f"{index_code}.parquet"
+    df = pl.read_parquet(fp, columns=["date", "close"])
+    df = df.with_columns(pl.col("date").cast(pl.Date)).sort("date")
+
+    df = df.with_columns(
+        pl.col("close").rolling_mean(fast_window).alias("ma_fast"),
+        pl.col("close").rolling_mean(slow_window).alias("ma_slow"),
+        (pl.col("close") / pl.col("close").shift(1) - 1.0).alias("idx_ret"),
+    )
+
+    # 持仓信号：fast_ma > slow_ma；用 T-1 日信号决定 T 日持仓
+    df = df.with_columns((pl.col("ma_fast") > pl.col("ma_slow")).alias("raw_signal"))
+    df = df.with_columns(pl.col("raw_signal").shift(1).alias("position"))
+
+    df_eval = df.filter(pl.col("position").is_not_null()).sort("date")
+    df_eval = df_eval.with_columns(
+        pl.when(pl.col("position")).then(pl.col("idx_ret")).otherwise(0.0).alias("strat_ret"),
+    )
+    df_eval = df_eval.with_columns(
+        (1.0 + pl.col("strat_ret")).cum_prod().alias("Strategy"),
+        (1.0 + pl.col("idx_ret")).cum_prod().alias("Index_BnH"),
+    )
+
+    n_days = df_eval.height
+    n_years = n_days / 252
+
+    def _stats(col: str) -> tuple[float, float, float, float, float]:
+        v = df_eval[col].drop_nulls()
+        total = v[-1]
+        cagr = total ** (1 / n_years) - 1
+        daily = (v / v.shift(1) - 1).drop_nulls()
+        vol = daily.std() * (252 ** 0.5)
+        sharpe = (daily.mean() * 252) / vol if vol > 0 else 0
+        dd = (v / v.cum_max() - 1).min()
+        return float(total), float(cagr), float(vol), float(sharpe), float(dd)
+
+    s_total, s_cagr, s_vol, s_sharpe, s_dd = _stats("Strategy")
+
+    # 交易统计
+    pos_list = df_eval["position"].to_list()
+    time_in_market = sum(1 for p in pos_list if p) / n_days
+    # 完整一轮 = position 从 False→True 直到下一次 True→False
+    n_trades = sum(1 for i in range(1, len(pos_list)) if pos_list[i] and not pos_list[i - 1])
+
+    df_eval.select(
+        ["date", "close", "ma_fast", "ma_slow", "position", "idx_ret", "strat_ret",
+         "Strategy", "Index_BnH"]
+    ).write_csv(output_csv)
+
+    stats = {
+        "total_return": s_total - 1,
+        "cagr": s_cagr,
+        "annual_vol": s_vol,
+        "sharpe": s_sharpe,
+        "max_drawdown": s_dd,
+        "n_days": n_days,
+        "time_in_market": time_in_market,
+        "n_trades": n_trades,
+        "start_date": str(df_eval["date"].min()),
+        "end_date": str(df_eval["date"].max()),
+    }
+
+    if output_png:
+        fig, ax = plt.subplots(figsize=(14, 6))
+        dates = df_eval["date"].to_numpy()
+        ax.plot(dates, df_eval["Strategy"].to_numpy(), color="black", linewidth=1.2,
+                label=f"MA({fast_window}/{slow_window}) Strategy")
+        ax.plot(dates, df_eval["Index_BnH"].to_numpy(), color="#1f77b4", linewidth=0.8,
+                alpha=0.7, label=f"{index_code} B&H")
+        # 持仓区间阴影
+        in_pos = False
+        seg_start = None
+        d_arr = df_eval["date"].to_list()
+        p_arr = pos_list
+        for i, p in enumerate(p_arr):
+            if p and not in_pos:
+                seg_start = d_arr[i]
+                in_pos = True
+            elif not p and in_pos:
+                ax.axvspan(seg_start, d_arr[i], color="#2ca02c", alpha=0.15, lw=0)
+                in_pos = False
+        if in_pos:
+            ax.axvspan(seg_start, d_arr[-1], color="#2ca02c", alpha=0.15, lw=0)
+        ax.set_yscale("log")
+        ax.set_xlabel("date")
+        ax.set_ylabel("NAV (log scale)")
+        ax.grid(True, which="both", alpha=0.3)
+        ax.xaxis.set_major_locator(mdates.YearLocator(2))
+        ax.xaxis.set_major_formatter(mdates.DateFormatter("%Y"))
+        ax.legend(loc="upper left")
+        plt.title(f"MA Crossover Strategy ({index_code}, {fast_window}/{slow_window})")
+        fig.tight_layout()
+        plt.savefig(output_png, dpi=120)
+        plt.close(fig)
+
+    return stats
