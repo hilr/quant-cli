@@ -8,7 +8,7 @@ from quant.convert import (convert_stock_quote, convert_margin_trade, convert_ad
                            convert_fund_flow, convert_index_quote, convert_index_ta, convert_index_boll,
                            convert_fwd_return, convert_historical_stats,
                            convert_fund_hs300_correlation)
-from quant.filter import filter_volume_spike as run_filter_volume_spike, filter_ma_converge as run_filter_ma_converge
+from quant.filter import filter_volume_spike as run_filter_volume_spike, filter_ma_converge as run_filter_ma_converge, filter_3d_surge as run_filter_3d_surge
 from quant.pipeline import build_stages, run_pipeline
 from quant.strategy import run_momentum_strategy, run_ma_crossover_strategy
 
@@ -268,6 +268,57 @@ def filter_ma_converge(
             f"{r['ma_max']:.2f}",
             f"{r['ma_min']:.2f}",
             f"{r['ma_spread']:.2%}",
+        )
+
+    console.print(table)
+
+    if len(results) > 100:
+        console.print(f"[dim]... 还有 {len(results) - 100} 只股票未显示[/dim]")
+
+    if output_csv:
+        import csv
+        with open(output_csv, "w", newline="", encoding="utf-8") as f:
+            writer = csv.DictWriter(f, fieldnames=results[0].keys())
+            writer.writeheader()
+            writer.writerows(results)
+        console.print(f"[green]结果已导出: {output_csv}[/green]")
+
+
+@cli.command()
+def filter_3d_surge(
+    date: str,
+    input_dir: str = "/mnt/dataset/stock_quote_ta",
+    min_market_cap: float = 200e8,
+    min_total_return: float = 0.10,
+    output_csv: str = None,
+) -> None:
+    """筛选 3 日连涨强势股：3 日连涨 + 累计涨幅达标 + 市值达标 + 非 ST"""
+    console.print(f"[cyan]筛选 3 日连涨股票 ({date})...[/cyan]")
+    results = run_filter_3d_surge(
+        input_dir=input_dir, date=date,
+        min_market_cap=min_market_cap, min_total_return=min_total_return,
+    )
+
+    if not results:
+        console.print("[yellow]没有找到符合条件的股票[/yellow]")
+        return
+
+    table = Table(title=f"3 日连涨股票 (共 {len(results)} 只)")
+    table.add_column("代码", style="cyan")
+    table.add_column("收盘价", style="white")
+    table.add_column("市值", style="yellow")
+    table.add_column("3日前收", style="magenta")
+    table.add_column("累计涨幅", style="bright_red")
+    table.add_column("最弱日", style="green")
+
+    for r in results[:100]:
+        table.add_row(
+            r["code"],
+            f"{r['close']:.2f}",
+            f"{r['market_cap']/1e8:.0f}亿",
+            f"{r['prev_close_3d']:.2f}",
+            f"{r['total_return']:.2%}",
+            f"{r['min_daily_return']:.2%}",
         )
 
     console.print(table)

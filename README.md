@@ -324,6 +324,57 @@ uv run python -m quant.cli filter-volume-spike /mnt/dataset/stock_quote_ta /tmp/
 
 ---
 
+### filter_3d_surge — 3 日连涨强势股单日筛选
+
+| 项 | 内容 |
+|---|------|
+| 命令 | `uv run python -m quant.cli filter-3d-surge <date> [options]` |
+| 输入 | `{input_dir}/{code}.parquet`（默认 stock_quote_ta） |
+| 输出 | 控制台表格 + 可选 CSV |
+| 逻辑 | 找出近 3 个交易日连续上涨且累计涨幅达标的强势股 |
+
+**筛选条件：**
+1. 非 ST 股票（从当天原始行情 `finance_sina/stock_quote/{date}.csv` 的 name 字段判断）
+2. 指定日期 `market_cap ≥ min_market_cap`
+3. 过去 3 个交易日（含指定日期）每日 `close > prev_close`
+4. 累计涨幅 `close[t] / close[t-3] - 1 ≥ min_total_return`
+
+**参数：**
+| 参数 | 说明 | 默认值 |
+|------|------|--------|
+| date | 指定日期（YYYY-MM-DD，位置参数） | 必填 |
+| input_dir | 输入目录 | /mnt/dataset/stock_quote_ta |
+| min_market_cap | 最小市值（单位：元） | 20000000000（200亿） |
+| min_total_return | 3 日累计涨幅下限 | 0.10（10%） |
+| output_csv | 导出 CSV 路径 | None（不导出） |
+
+**输出字段：**
+| 字段 | 含义 |
+|------|------|
+| code | 股票代码 |
+| date | 指定日期 |
+| close | 指定日期收盘价 |
+| market_cap | 指定日期总市值 |
+| prev_close_3d | 3 个交易日前的收盘价（累计涨幅基准） |
+| total_return | `close / prev_close_3d - 1` |
+| min_daily_return | 3 日中日收益率的最低值（衡量连涨强度） |
+
+结果按 `total_return` 降序排列。
+
+**使用示例：**
+```bash
+# 默认参数（200亿市值、3日累计10%）
+uv run python -m quant.cli filter-3d-surge 2026-06-15
+
+# 收紧到 3 日累计 20%
+uv run python -m quant.cli filter-3d-surge 2026-06-15 --min-total-return 0.20
+
+# 导出 CSV
+uv run python -m quant.cli filter-3d-surge 2026-06-15 --output-csv /tmp/surge.csv
+```
+
+---
+
 ## 策略
 
 ### momentum_strategy — 月度动量轮动

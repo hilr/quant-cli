@@ -4,6 +4,7 @@
 
 - ``filter_volume_spike`` —— 扫描所有历史日期，找出每日成交额放量股票
 - ``filter_ma_converge`` —— 单日筛选均线收敛股票
+- ``filter_3d_surge`` —— 单日筛选 3 日连涨强势股
 """
 from pathlib import Path
 
@@ -158,4 +159,105 @@ def filter_ma_converge(
         })
 
     results.sort(key=lambda x: x["market_cap"], reverse=True)
+    return results
+
+
+# ============== filter_3d_surge ==============
+
+SURGE_DAYS = 3
+
+
+def filter_3d_surge(
+    input_dir: str,
+    date: str,
+    min_market_cap: float = 200e8,
+    min_total_return: float = 0.10,
+) -> list[dict]:
+    """筛选过去 3 个交易日连续上涨、且累计涨幅达标的强势股：
+
+    1. 非 ST 股票
+    2. 指定日期 market_cap >= min_market_cap
+    3. 过去 3 个交易日（含指定日期）每日 close > prev_close
+    4. 累计涨幅 close[t] / close[t-3] - 1 >= min_total_return
+    """
+    input_path = Path(input_dir)
+    parquet_files = sorted(input_path.glob("*.parquet"))
+    if not parquet_files:
+        raise FileNotFoundError(f"No parquet files found in {input_path}")
+
+    required_cols = ["date", "code", "close", "prev_close", "market_cap"]
+
+    raw_csv = input_path.parent.parent / "readonly_dataset" / "finance_sina" / "stock_quote" / f"{date}.csv"
+    if raw_csv.exists():
+        raw_df = pl.read_csv(raw_csv, columns=["code", "name"])
+        raw_df = raw_df.with_columns(pl.col("code").cast(pl.String).str.zfill(6))
+        st_codes = set(raw_df.filter(
+            pl.col("name").str.to_uppercase().str.contains("ST")
+        )["code"].to_list())
+    else:
+        st_codes = set()
+
+    results = []
+
+    for pf in parquet_files:
+        code = pf.stem
+        if code in st_codes:
+            continue
+
+        try:
+            df = pl.read_parquet(pf, columns=required_cols)
+        except Exception:
+            continue
+
+        df = df.sort("date")
+
+        dates_list = df["date"].to_list()
+        try:
+            target_idx = dates_list.index(date)
+        except ValueError:
+            continue
+
+        if target_idx < SURGE_DAYS:
+            continue
+
+        target_row = df.row(target_idx, named=True)
+        target_close = target_row["close"]
+        target_market_cap = target_row["market_cap"]
+        if target_close is None or target_market_cap is None:
+            continue
+        if target_market_cap < min_market_cap:
+            continue
+
+        window_df = df.slice(target_idx - SURGE_DAYS, SURGE_DAYS + 1)
+        closes = window_df["close"].to_list()
+        prev_closes = window_df["prev_close"].to_list()
+
+        daily_returns = []
+        for i in range(1, len(closes)):
+            pc, c = prev_closes[i], closes[i]
+            if pc is None or pc <= 0 or c is None:
+                daily_returns.append(None)
+            else:
+                daily_returns.append(c / pc - 1)
+        if any(r is None or r <= 0 for r in daily_returns):
+            continue
+
+        baseline_close = closes[0]
+        if baseline_close is None or baseline_close <= 0:
+            continue
+        total_return = target_close / baseline_close - 1
+        if total_return < min_total_return:
+            continue
+
+        results.append({
+            "code": code,
+            "date": date,
+            "close": target_close,
+            "market_cap": target_market_cap,
+            "prev_close_3d": baseline_close,
+            "total_return": total_return,
+            "min_daily_return": min(daily_returns),
+        })
+
+    results.sort(key=lambda x: x["total_return"], reverse=True)
     return results
