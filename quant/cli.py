@@ -8,7 +8,10 @@ from quant.convert import (convert_stock_quote, convert_margin_trade, convert_ad
                            convert_fund_flow, convert_index_quote, convert_index_ta, convert_index_boll,
                            convert_fwd_return, convert_historical_stats,
                            convert_fund_hs300_correlation)
-from quant.filter import filter_volume_spike as run_filter_volume_spike, filter_ma_converge as run_filter_ma_converge
+from quant.filter import (filter_volume_spike as run_filter_volume_spike,
+                          filter_ma_converge as run_filter_ma_converge,
+                          filter_by_tags as run_filter_by_tags)
+from quant.tags import TAG_FUNCS
 from quant.pipeline import build_stages, run_pipeline
 from quant.strategy import run_momentum_strategy, run_ma_crossover_strategy
 
@@ -227,6 +230,56 @@ def filter_volume_spike(
         ma_period=ma_period, min_date=min_date,
     )
     console.print(f"[green]完成! 共 {count} 条放量记录 → {output_csv}[/green]")
+
+
+@cli.command()
+def filter_by_tags(
+    date: str = typer.Argument(..., help="指定日期 (YYYY-MM-DD)"),
+    tags: list[str] = typer.Argument(..., help=f"Tag 名（AND 组合，可多个）。可选: {list(TAG_FUNCS.keys())}"),
+    input_dir: str = "/mnt/dataset/stock_quote_ta",
+    min_market_cap: float = 0,
+    exclude_st: bool = True,
+    output_csv: str = None,
+) -> None:
+    """筛选指定日期同时命中所有 tags 的股票（AND 组合）"""
+    console.print(f"[cyan]筛选 tag 组合 ({date}, tags={tags})...[/cyan]")
+    try:
+        results = run_filter_by_tags(
+            input_dir=input_dir, date=date, tags=tags,
+            min_market_cap=min_market_cap, exclude_st=exclude_st,
+        )
+    except ValueError as e:
+        console.print(f"[red]{e}[/red]")
+        raise typer.Exit(1)
+
+    if not results:
+        console.print("[yellow]没有找到符合条件的股票[/yellow]")
+        return
+
+    table = Table(title=f"Tag 命中股票 (共 {len(results)} 只, tags={'+'.join(tags)})")
+    table.add_column("代码", style="cyan")
+    table.add_column("收盘价", style="white")
+    table.add_column("市值", style="yellow")
+
+    for r in results[:100]:
+        table.add_row(
+            r["code"],
+            f"{r['close']:.2f}",
+            f"{r['market_cap']/1e8:.0f}亿",
+        )
+
+    console.print(table)
+
+    if len(results) > 100:
+        console.print(f"[dim]... 还有 {len(results) - 100} 只股票未显示[/dim]")
+
+    if output_csv:
+        import csv
+        with open(output_csv, "w", newline="", encoding="utf-8") as f:
+            writer = csv.DictWriter(f, fieldnames=results[0].keys())
+            writer.writeheader()
+            writer.writerows(results)
+        console.print(f"[green]结果已导出: {output_csv}[/green]")
 
 
 @cli.command()
