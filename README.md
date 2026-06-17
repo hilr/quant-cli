@@ -344,6 +344,56 @@ uv run python -m quant.cli filter-by-tags 2026-06-15 limit_up --no-exclude-st
 
 ---
 
+### filter_limit_up_pullback — 涨停回踩（tag + 时间窗口复合 filter）
+
+| 项 | 内容 |
+|---|------|
+| 命令 | `uv run python -m quant.cli filter-limit-up-pullback <date> [options]` |
+| 输入 | `{input_dir}/{code}.parquet`（默认 stock_quote_ta） |
+| 输出 | 控制台表格 + 可选 CSV |
+| 逻辑 | 在 `tag_limit_up` 之上叠加时间窗口条件：近期涨停 + 回踩到涨停前价位 |
+
+**筛选条件：**
+1. 非 ST 股票
+2. 指定日期 `market_cap >= min_market_cap`
+3. 指定日期前 `lookback_days` 个交易日内（窗口跨度 ≤ `max_calendar_span` 自然日，用于排除停牌）出现过 `tag_limit_up`
+4. 指定日期 `close < (1 + pullback_tolerance) × 涨停日 prev_close`
+
+窗口内多次涨停取最近一次作为锚点。
+
+**参数：**
+| 参数 | 说明 | 默认值 |
+|------|------|--------|
+| date | 指定日期（YYYY-MM-DD，位置参数） | 必填 |
+| input_dir | 输入目录 | /mnt/dataset/stock_quote_ta |
+| min_market_cap | 最小市值（单位：元） | 10000000000（100亿） |
+| lookback_days | 回看交易日数 | 10 |
+| max_calendar_span | 窗口最大自然日跨度 | 14 |
+| pullback_tolerance | 相对涨停前价位的容忍度 | 0.01（1%） |
+| output_csv | 导出 CSV 路径 | None（不导出） |
+
+**输出字段：**
+| 字段 | 含义 |
+|------|------|
+| code | 股票代码 |
+| date | 指定日期 |
+| close | 指定日期收盘价 |
+| market_cap | 指定日期总市值 |
+| zt_date | 锚点涨停日 |
+| zt_prev_close | 涨停前一交易日收盘价 |
+| pullback_pct | `close / zt_prev_close - 1` |
+
+**使用示例：**
+```bash
+# 默认参数
+uv run python -m quant.cli filter-limit-up-pullback 2026-06-15
+
+# 放宽到近 20 个交易日、市值 50 亿
+uv run python -m quant.cli filter-limit-up-pullback 2026-06-15 --lookback-days 20 --min-market-cap 5000000000
+```
+
+---
+
 ### filter_volume_spike — 放量股票批量筛选
 
 | 项 | 内容 |

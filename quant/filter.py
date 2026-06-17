@@ -5,14 +5,16 @@ filter 层基于 ``quant.tags`` 做 (股票, 日期) 维度的组合查询。
 当前提供：
 
 - ``filter_by_tags`` —— 单日 AND 组合多个 tag
+- ``filter_limit_up_pullback`` —— 复合 filter：近期 tag_limit_up + 回踩到涨停前价位
 - ``filter_volume_spike`` —— 扫描所有历史日期，找出每日成交额放量股票（批量导出版）
 - ``filter_ma_converge`` —— 单日筛选均线收敛股票（条件较复杂，未拆 tag）
 """
+from datetime import datetime
 from pathlib import Path
 
 import polars as pl
 
-from quant.tags import TAG_REQUIRED_COLUMNS, add_tags
+from quant.tags import TAG_REQUIRED_COLUMNS, add_tags, tag_limit_up
 
 
 # ============== filter_by_tags ==============
@@ -225,6 +227,102 @@ def filter_ma_converge(
             "ma_max": ma_max,
             "ma_min": ma_min,
             "ma_spread": ma_max / ma_min - 1,
+        })
+
+    results.sort(key=lambda x: x["market_cap"], reverse=True)
+    return results
+
+
+# ============== filter_limit_up_pullback ==============
+
+def filter_limit_up_pullback(
+    input_dir: str,
+    date: str,
+    min_market_cap: float = 100e8,
+    lookback_days: int = 10,
+    max_calendar_span: int = 14,
+    pullback_tolerance: float = 0.01,
+    limit_up_ratio: float = 0.099,
+) -> list[dict]:
+    """复合 filter：近期涨停后回踩到涨停前价位的股票。
+
+    时间窗口条件（属于 filter 层，不是 tag 层）：
+    1. 非 ST 股票
+    2. 指定日期 market_cap >= min_market_cap
+    3. 指定日期前 lookback_days 个交易日内（窗口跨度 <= max_calendar_span 自然日，
+       用于排除停牌），出现过 ``tag_limit_up``
+    4. 指定日期 close < (1 + pullback_tolerance) * 涨停日 prev_close
+
+    多次涨停取最近一次作为锚点。
+    """
+    input_path = Path(input_dir)
+    parquet_files = sorted(input_path.glob("*.parquet"))
+    if not parquet_files:
+        raise FileNotFoundError(f"No parquet files found in {input_path}")
+
+    required_cols = ["date", "code", "close", "prev_close", "market_cap"]
+    target_date = datetime.strptime(date, "%Y-%m-%d").date()
+    st_codes = _load_st_codes(input_path, date)
+
+    results = []
+
+    for pf in parquet_files:
+        code = pf.stem
+        if code in st_codes:
+            continue
+
+        try:
+            df = pl.read_parquet(pf, columns=required_cols)
+        except Exception:
+            continue
+
+        df = df.sort("date")
+        df = tag_limit_up(df, ratio=limit_up_ratio)
+
+        dates_list = df["date"].to_list()
+        try:
+            target_idx = dates_list.index(date)
+        except ValueError:
+            continue
+
+        target_row = df.row(target_idx, named=True)
+        target_close = target_row["close"]
+        target_market_cap = target_row["market_cap"]
+        if target_close is None or target_market_cap is None:
+            continue
+        if target_market_cap < min_market_cap:
+            continue
+
+        window_start = max(0, target_idx - lookback_days)
+        window_df = df.slice(window_start, target_idx - window_start)
+        if window_df.height == 0:
+            continue
+
+        window_first_date = datetime.strptime(window_df["date"][0], "%Y-%m-%d").date()
+        if (target_date - window_first_date).days > max_calendar_span:
+            continue
+
+        zt_rows = window_df.filter(pl.col("tag_limit_up"))
+        if zt_rows.height == 0:
+            continue
+
+        zt_row = zt_rows.row(-1, named=True)
+        zt_date = zt_row["date"]
+        zt_prev_close = zt_row["prev_close"]
+        if zt_prev_close is None or zt_prev_close <= 0:
+            continue
+
+        if target_close >= (1 + pullback_tolerance) * zt_prev_close:
+            continue
+
+        results.append({
+            "code": code,
+            "date": date,
+            "close": target_close,
+            "market_cap": target_market_cap,
+            "zt_date": zt_date,
+            "zt_prev_close": zt_prev_close,
+            "pullback_pct": target_close / zt_prev_close - 1,
         })
 
     results.sort(key=lambda x: x["market_cap"], reverse=True)

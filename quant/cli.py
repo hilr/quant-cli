@@ -10,7 +10,8 @@ from quant.convert import (convert_stock_quote, convert_margin_trade, convert_ad
                            convert_fund_hs300_correlation)
 from quant.filter import (filter_volume_spike as run_filter_volume_spike,
                           filter_ma_converge as run_filter_ma_converge,
-                          filter_by_tags as run_filter_by_tags)
+                          filter_by_tags as run_filter_by_tags,
+                          filter_limit_up_pullback as run_filter_limit_up_pullback)
 from quant.tags import TAG_FUNCS
 from quant.pipeline import build_stages, run_pipeline
 from quant.strategy import run_momentum_strategy, run_ma_crossover_strategy
@@ -266,6 +267,60 @@ def filter_by_tags(
             r["code"],
             f"{r['close']:.2f}",
             f"{r['market_cap']/1e8:.0f}亿",
+        )
+
+    console.print(table)
+
+    if len(results) > 100:
+        console.print(f"[dim]... 还有 {len(results) - 100} 只股票未显示[/dim]")
+
+    if output_csv:
+        import csv
+        with open(output_csv, "w", newline="", encoding="utf-8") as f:
+            writer = csv.DictWriter(f, fieldnames=results[0].keys())
+            writer.writeheader()
+            writer.writerows(results)
+        console.print(f"[green]结果已导出: {output_csv}[/green]")
+
+
+@cli.command()
+def filter_limit_up_pullback(
+    date: str,
+    input_dir: str = "/mnt/dataset/stock_quote_ta",
+    min_market_cap: float = 100e8,
+    lookback_days: int = 10,
+    max_calendar_span: int = 14,
+    pullback_tolerance: float = 0.01,
+    output_csv: str = None,
+) -> None:
+    """复合 filter：近期 tag_limit_up + 回踩到涨停前价位"""
+    console.print(f"[cyan]筛选涨停回踩股票 ({date})...[/cyan]")
+    results = run_filter_limit_up_pullback(
+        input_dir=input_dir, date=date,
+        min_market_cap=min_market_cap, lookback_days=lookback_days,
+        max_calendar_span=max_calendar_span, pullback_tolerance=pullback_tolerance,
+    )
+
+    if not results:
+        console.print("[yellow]没有找到符合条件的股票[/yellow]")
+        return
+
+    table = Table(title=f"涨停回踩股票 (共 {len(results)} 只)")
+    table.add_column("代码", style="cyan")
+    table.add_column("收盘价", style="white")
+    table.add_column("市值", style="yellow")
+    table.add_column("涨停日", style="magenta")
+    table.add_column("涨停前收", style="green")
+    table.add_column("回踩幅度", style="bright_red")
+
+    for r in results[:100]:
+        table.add_row(
+            r["code"],
+            f"{r['close']:.2f}",
+            f"{r['market_cap']/1e8:.0f}亿",
+            r["zt_date"],
+            f"{r['zt_prev_close']:.2f}",
+            f"{r['pullback_pct']:.2%}",
         )
 
     console.print(table)
