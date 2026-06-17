@@ -1,4 +1,9 @@
 """数据转换模块"""
+import csv
+import re
+import zipfile
+from xml.etree import ElementTree as ET
+
 import polars as pl
 from pathlib import Path
 
@@ -987,4 +992,159 @@ def convert_fund_hs300_correlation(
         count += 1
 
     print(f"Saved {count} funds to {output_path}")
+    return count
+
+
+# ============== industry_profit ==============
+
+# XLSX 命名空间
+_XLSX_NS = "{http://schemas.openxmlformats.org/spreadsheetml/2006/main}"
+
+
+def _load_cumulative(path: Path, indicator_prefix: str) -> dict[int, float]:
+    r"""读一个年文件，返回 {month: 累计值}。
+
+    支持 CSV（第 1 行表头）和 XLSX（前 2 行元数据，第 3 行表头）。
+    月份列顺序乱序，按列名 `(\d+)月` 提取月份后映射。
+    """
+    if path.suffix.lower() == ".csv":
+        return _load_cumulative_csv(path, indicator_prefix)
+    return _load_cumulative_xlsx(path, indicator_prefix)
+
+
+def _load_cumulative_csv(path: Path, indicator_prefix: str) -> dict[int, float]:
+    with open(path, encoding="utf-8") as f:
+        reader = csv.reader(f)
+        header = next(reader)
+        month_by_col: dict[int, int] = {}
+        for col_idx, name in enumerate(header[1:], start=1):
+            m = re.search(r"(\d+)月", name)
+            if m:
+                month_by_col[col_idx] = int(m.group(1))
+        for row in reader:
+            if not row or not row[0].strip().startswith(indicator_prefix):
+                continue
+            return _row_to_cum(row, month_by_col)
+    return {}
+
+
+def _load_cumulative_xlsx(path: Path, indicator_prefix: str) -> dict[int, float]:
+    with zipfile.ZipFile(path) as z:
+        strings = re.findall(
+            r"<t[^>]*>([^<]*)</t>",
+            z.read("xl/sharedStrings.xml").decode("utf-8"),
+        )
+        root = ET.fromstring(z.read("xl/worksheets/sheet1.xml").decode("utf-8"))
+
+    def cell_text(cell):
+        v = cell.find(f"{_XLSX_NS}v")
+        if v is None:
+            return ""
+        t = cell.attrib.get("t")
+        if t == "s":
+            return strings[int(v.text)]
+        return v.text or ""
+
+    header_row = None
+    for row in root.iter(f"{_XLSX_NS}row"):
+        first_text = cell_text(list(row)[0]) if list(row) else ""
+        if first_text == "指标":
+            header_row = row
+            break
+    if header_row is None:
+        return {}
+
+    cells = list(header_row)
+    month_by_col: dict[int, int] = {}
+    for col_idx, cell in enumerate(cells[1:], start=1):
+        m = re.search(r"(\d+)月", cell_text(cell))
+        if m:
+            month_by_col[col_idx] = int(m.group(1))
+
+    for row in root.iter(f"{_XLSX_NS}row"):
+        cells = list(row)
+        if not cells:
+            continue
+        if cell_text(cells[0]).strip().startswith(indicator_prefix):
+            return _row_to_cum([cell_text(c) for c in cells], month_by_col)
+    return {}
+
+
+def _row_to_cum(values: list[str], month_by_col: dict[int, int]) -> dict[int, float]:
+    cum: dict[int, float] = {}
+    for col_idx, month in month_by_col.items():
+        if col_idx >= len(values):
+            continue
+        raw = (values[col_idx] or "").strip()
+        if not raw:
+            continue
+        try:
+            cum[month] = float(raw)
+        except ValueError:
+            continue
+    return cum
+
+
+def _cumulative_to_monthly(cum: dict[int, float]) -> dict[int, float | None]:
+    """相邻已知累计点之间均摊差额。
+
+    锚点 cum[0]=0；对每个已知月 m：区间 (prev_m, m] 共 gap=m-prev_m 个月，
+    每个月 profit = (cum[m] - prev_cum) / gap。
+    最后一个已知月之后的月份返回 None。
+    """
+    profit: dict[int, float | None] = {m: None for m in range(1, 13)}
+    months_known = sorted(cum.keys())
+    prev_m, prev_cum = 0, 0.0
+    for m in months_known:
+        gap = m - prev_m
+        if gap <= 0:
+            continue
+        per_month = (cum[m] - prev_cum) / gap
+        for mm in range(prev_m + 1, m + 1):
+            profit[mm] = per_month
+        prev_m, prev_cum = m, cum[m]
+    return profit
+
+
+def convert_industry_profit(data_path: str, output_dir: str) -> int:
+    """将工业企业利润累计值转换为每月当月利润总额，每年一个 CSV。
+
+    - 满数据年（gap=1）：精确差分。
+    - 稀疏年 2007–2009（仅 2/5/8/11 月）：3–11 月为等额估计值，12 月空。
+    - 2010 从 2011 文件的「上年同期累计值」重建（新口径，2–12 月齐全，精确）。
+    - 2026 当前仅有 2/3/4 月：1–4 月有值，5–12 月空。
+    """
+    src_path = Path(data_path) / "gov_stats" / "工业企业指标"
+    output_path = Path(output_dir) / "gov_stat" / "industry_profit"
+    output_path.mkdir(parents=True, exist_ok=True)
+
+    count = 0
+    for year in range(2000, 2027):
+        if year == 2010:
+            src_year, prefix = 2011, "利润总额上年同期累计值"
+        else:
+            src_year, prefix = year, "利润总额累计值"
+
+        src_file = src_path / f"{src_year}.csv"
+        if not src_file.exists():
+            src_file = src_path / f"{src_year}.xlsx"
+        if not src_file.exists():
+            print(f"  跳过 {year}：找不到源文件 {src_year}")
+            continue
+
+        cum = _load_cumulative(src_file, prefix)
+        if not cum:
+            print(f"  跳过 {year}：{src_file.name} 未找到 {prefix}")
+            continue
+
+        profit = _cumulative_to_monthly(cum)
+        df = pl.DataFrame({
+            "year": [year] * 12,
+            "month": list(range(1, 13)),
+            "profit": [profit[m] for m in range(1, 13)],
+        })
+        df.write_csv(output_path / f"{year}.csv")
+        count += 1
+
+    print(f"Saved {count} yearly files to {output_path}")
     return count
