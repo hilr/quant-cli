@@ -7,7 +7,7 @@ from quant.convert import (convert_stock_quote, convert_margin_trade, convert_ad
                            convert_ta, convert_boll, convert_fund_shares, convert_fund_quote, convert_fund_adjust,
                            convert_fund_flow, convert_index_quote, convert_index_ta, convert_index_boll,
                            convert_fwd_return, convert_historical_stats,
-                           convert_fund_hs300_correlation)
+                           convert_fund_hs300_correlation, convert_industry_profit)
 from quant.filter import (filter_volume_spike as run_filter_volume_spike,
                           filter_ma_converge as run_filter_ma_converge,
                           filter_by_tags as run_filter_by_tags,
@@ -212,6 +212,17 @@ def historical_stats(
     console.print(f"[cyan]计算历史统计数据...[/cyan]")
     count = convert_historical_stats(input_dir=input_dir, output_dir=output_dir)
     console.print(f"[green]完成! 共 {count} 只股票[/green]")
+
+
+@cli.command()
+def industry_profit(
+    data_path: str = "/mnt/readonly_dataset",
+    output_dir: str = "/mnt/dataset",
+) -> None:
+    """将工业企业利润累计值转换为每月当月利润总额，每年一个 CSV"""
+    console.print(f"[cyan]生成工业企业月度利润数据...[/cyan]")
+    count = convert_industry_profit(data_path=data_path, output_dir=output_dir)
+    console.print(f"[green]完成! 共 {count} 个年度文件[/green]")
 
 
 @cli.command()
