@@ -30,6 +30,8 @@
 | 数据集 | 类型 | 说明 | 文档 |
 |--------|------|------|------|
 | gov_stats/工业企业指标 | 原始 | 规模以上工业企业月度经济效益 | [文档](docs/datasets/gov_stats_industrial.md) |
+| csindex/industry | 原始 | 中证行业分类快照（一/二/三/四级），日度但变化慢 | 见下方 |
+| csindex/index_weight/{000300,000905} | 原始 | HS300 / CSI500 月度成分权重（OLE .xls 伪装成 .xlsx） | 见下方 |
 | industry_profit | 生成 | 工业企业每月利润总额 | [文档](docs/datasets/industry_profit.md) |
 | stock_quote_history | 生成 | 股票行情历史 | [文档](docs/datasets/stock_quote_history.md) |
 | stock_quote_adjusted | 生成 | 前复权行情 | [文档](docs/datasets/stock_quote_adjusted.md) |
@@ -40,6 +42,43 @@
 | fund_quote_history | 生成 | 基金行情历史 | [文档](docs/datasets/fund_quote_history.md) |
 | fund_flow | 生成 | 基金资金流 | [文档](docs/datasets/fund_flow.md) |
 | fund_hs300_correlation | 生成 | 沪深300关联基金滚动相关性 | [文档](docs/datasets/fund_hs300_correlation.md) |
+
+---
+
+## 可视化脚本
+
+独立 argparse 脚本，放在 `plots/`，输出 PNG 到 `/mnt/dataset/`。
+
+### industry_heatmap — 行业成交额-涨幅方块热力图
+
+finviz 风格的市场全景热力图：方块按中证行业聚集，方块大小 ∝ 当日成交额，颜色 ∝ 当日涨幅（A股惯例红涨绿跌）。范围限定 HS300 + CSI500 成分股（约 800 只）。
+
+```bash
+# 最新交易日（自动跳过残缺尾段），中证一级行业
+uv run python plots/industry_heatmap.py
+
+# 中证二级行业
+uv run python plots/industry_heatmap.py --level 2
+
+# 指定日期
+uv run python plots/industry_heatmap.py --date 2025-10-30
+```
+
+| 参数 | 说明 | 默认 |
+|------|------|------|
+| `--date` | 目标日期 YYYY-MM-DD | 最新行数 ≥ 4000 的交易日 |
+| `--level` | 行业层级 1/2/3 | 1（中证一级，约 11 类） |
+| `--data-path` | 只读原始数据根目录 | /mnt/readonly_dataset |
+| `--output` | 输出 PNG 路径 | /mnt/dataset/industry_heatmap_{date}_l{level}.png |
+
+**数据源：**
+- 行业分类：`{data_path}/csindex/industry/{date}.xlsx`（取最新一份）
+- HS300/CSI500 成分：`{data_path}/csindex/index_weight/{000300,000905}/{date}.xlsx`（实为 OLE .xls 伪装，脚本内部自动处理）
+- 当日行情：`{data_path}/eastmoney/stock_quote/{date}.csv`
+
+**行业表字段：** 证券代码, 证券简称, 中证一/二/三/四级行业分类代码与简称（8394 只股票，11 个一级、35 个二级、~90 个三级、~200 个四级）
+
+**权重表字段：** 日期Date, 指数代码, 指数名称, 成份券代码, 成份券名称, 交易所, 权重(%)
 
 ---
 
