@@ -39,8 +39,11 @@ RED_GREEN_CMAP = LinearSegmentedColormap.from_list(
 )
 
 OLE_MAGIC = b"\xd0\xcf\x11\xe0"
-TITLE_H = 3.5
-INNER_PAD = 0.8
+# 标题与内边距按行业块尺寸的固定比例预留，这样扣完后内层可用面积 ∝ 行业总成交额，
+# 进而保证股票方块面积严格 ∝ 自身成交额（跨行业可比）。
+PAD_FRAC = 0.015
+TITLE_FRAC = 0.12
+MIN_TITLE_H = 1.5  # 标题区高度低于此值时跳过标题文字（避免微观行业标题糊成一团）
 TEXT_AREA_THRESHOLD = 1.2
 
 
@@ -164,30 +167,38 @@ def render(df: pl.DataFrame, target_date: str, level: int, output: Path) -> None
         ind_name = ind_row["industry"]
         avg_chg = ind_row["avg_chg"]
 
+        # 按行业块尺寸的固定比例预留 padding/title
+        pad_x = rect["dx"] * PAD_FRAC
+        pad_y = rect["dy"] * PAD_FRAC
+        title_h = rect["dy"] * TITLE_FRAC
+
         ax.add_patch(Rectangle(
             (rect["x"], rect["y"]), rect["dx"], rect["dy"],
             facecolor="#fafafa", edgecolor="#888", linewidth=1.0, zorder=1,
         ))
 
-        title_color = "#8b1a1a" if avg_chg > 0.002 else ("#0d5a3f" if avg_chg < -0.002 else "#555")
-        ax.text(
-            rect["x"] + rect["dx"] / 2, rect["y"] + rect["dy"] - TITLE_H / 2,
-            f"{ind_name}  {avg_chg*100:+.2f}%  ({ind_row['count']})",
-            ha="center", va="center", fontsize=10.5, fontweight="bold",
-            color=title_color, zorder=5,
-        )
+        if title_h >= MIN_TITLE_H:
+            title_color = "#8b1a1a" if avg_chg > 0.002 else ("#0d5a3f" if avg_chg < -0.002 else "#555")
+            # 字号随行业块大小变化
+            title_fontsize = max(7, min(12, rect["dy"] * 0.45))
+            ax.text(
+                rect["x"] + rect["dx"] / 2, rect["y"] + rect["dy"] - title_h / 2,
+                f"{ind_name}  {avg_chg*100:+.2f}%  ({ind_row['count']})",
+                ha="center", va="center", fontsize=title_fontsize, fontweight="bold",
+                color=title_color, zorder=5,
+            )
 
         sub = df.filter(pl.col("industry") == ind_name).sort("turnover", descending=True)
         if sub.height == 0:
             continue
 
-        ix = rect["x"] + INNER_PAD
-        iy = rect["y"] + INNER_PAD
-        iw = rect["dx"] - 2 * INNER_PAD
-        ih = rect["dy"] - 2 * INNER_PAD - TITLE_H
+        ix = rect["x"] + pad_x
+        iy = rect["y"] + pad_y
+        iw = rect["dx"] - 2 * pad_x
+        ih = rect["dy"] - 2 * pad_y - title_h
         if iw <= 0 or ih <= 0:
             continue
-        iy += TITLE_H
+        iy += title_h
 
         norm_sizes = squarify.normalize_sizes(sub["turnover"].to_list(), iw, ih)
         stock_rects = squarify.squarify(norm_sizes, ix, iy, iw, ih)
@@ -203,7 +214,6 @@ def render(df: pl.DataFrame, target_date: str, level: int, output: Path) -> None
             ))
             area = sr["dx"] * sr["dy"]
             if area > TEXT_AREA_THRESHOLD:
-                # 文字颜色：底色深时用白，浅时用黑
                 txt_color = "white" if abs(chg) > 0.04 else "#1a1a1a"
                 fontsize = 8 if area > 4 else (6.5 if area > 2 else 5.5)
                 ax.text(
