@@ -110,11 +110,15 @@ def pick_latest_full_date(data_path: Path) -> str:
     raise RuntimeError(f"找不到行数 >= {MIN_FULL_ROWS} 的完整行情文件")
 
 
-def _draw_block(ax, x: float, y: float, w: float, h: float, ind: dict, color_norm) -> None:
-    """画一个行业方块 + 文字。文字密度按方块大小自适应。"""
+def _draw_block(ax, x: float, y_sq: float, w: float, h: float, ind: dict, color_norm) -> None:
+    """画一个行业方块 + 文字。文字密度按方块大小自适应。
+
+    y_sq 是 squarify 输出的 y（y-down：0 在画布顶部），内部转成 matplotlib 的 y-up（0 在底部）。
+    """
     chg = ind["weighted_chg"]
     clamped = max(-COLOR_LIMIT, min(COLOR_LIMIT, chg))
     color = RED_GREEN_CMAP(color_norm(clamped))
+    y = 100.0 - y_sq - h  # 坐标系转换
     ax.add_patch(Rectangle(
         (x, y), w, h,
         facecolor=color, edgecolor="white", linewidth=1.0, zorder=2,
