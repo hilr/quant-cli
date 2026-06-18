@@ -1,7 +1,10 @@
 """行业方块热力图
 
-一个三级行业一个方块，方块大小 ∝ 行业内所有股票当日成交额合计，颜色 ∝ 行业成交额加权涨跌幅（A股惯例红涨绿跌）。
-不限定股票范围，全部 A 股按行业聚合。
+二维布局：行 = 涨幅 tier（顶 = 高涨幅，底 = 大跌），行内列 = 按成交额降序（左 = 高）。
+- 左上角：高涨幅 tier 中成交额最大的行业
+- 左下角：大跌 tier 中成交额最大的行业
+- 方块颜色 = 行业成交额加权涨跌幅（A股惯例红涨绿跌）
+- 方块宽度 ∝ 行业总成交额（行高均匀，故面积 ∝ 成交额）
 
 数据源：
 - 行业分类：/mnt/readonly_dataset/csindex/industry/{date}.xlsx
@@ -10,13 +13,13 @@
 from __future__ import annotations
 
 import argparse
+import math
 import shutil
 import tempfile
 from pathlib import Path
 
 import matplotlib.pyplot as plt
 import polars as pl
-import squarify
 from matplotlib.colors import LinearSegmentedColormap, Normalize
 from matplotlib.patches import Rectangle
 
@@ -107,12 +110,14 @@ def pick_latest_full_date(data_path: Path) -> str:
 
 
 def render(industries: pl.DataFrame, target_date: str, level: int, output: Path) -> None:
-    """单层 squarify 渲染行业热力图。"""
+    """二维矩阵渲染：行=涨幅 tier，列=行业按 turnover 降序。"""
     plt.rcParams["font.sans-serif"] = CJK_FONTS
     plt.rcParams["axes.unicode_minus"] = False
 
-    fig, ax = plt.subplots(figsize=(20, 12), dpi=120)
+    fig = plt.figure(figsize=(22, 13), dpi=120)
     fig.patch.set_facecolor("white")
+    # 左侧 6% 留给 colorbar
+    ax = fig.add_axes([0.06, 0.05, 0.93, 0.88])
     ax.set_xlim(0, 100)
     ax.set_ylim(0, 100)
     ax.axis("off")
@@ -121,72 +126,86 @@ def render(industries: pl.DataFrame, target_date: str, level: int, output: Path)
     total_turnover_yi = industries["total_turnover"].sum() / 1e8
     up = industries.filter(pl.col("weighted_chg") > 0).height
     down = industries.filter(pl.col("weighted_chg") < 0).height
-    ax.set_title(
+    fig.text(
+        0.525, 0.965,
         f"行业全景热力图 · {target_date} · 中证{level_name}行业 · 全 A 股\n"
-        f"方块大小=行业总成交额（共 {total_turnover_yi:.0f} 亿）  "
-        f"颜色=成交额加权涨跌幅（红涨绿跌）  "
-        f"{industries.height} 个行业（涨 {up} / 跌 {down}）",
-        fontsize=14, pad=18,
+        f"行 = 涨幅 tier（顶高底低）  列 = 行内成交额降序（左高）  "
+        f"共 {industries.height} 个行业（涨 {up} / 跌 {down}），总成交额 {total_turnover_yi:.0f} 亿",
+        ha="center", va="top", fontsize=13,
     )
 
-    sizes = industries["total_turnover"].to_list()
-    norm_sizes = squarify.normalize_sizes(sizes, 100, 100)
-    rects = squarify.squarify(norm_sizes, 0, 0, 100, 100)
+    # 按 gain desc 排序后切分成行（tier）
+    sorted_df = industries.sort("weighted_chg", descending=True)
+    n = sorted_df.height
+    # 行列数按图幅宽高比自适应（宽:高 ≈ 1.7）
+    aspect = 1.7
+    n_rows = max(1, int(round(math.sqrt(n / aspect))))
+    n_cols = math.ceil(n / n_rows)
+    rows = [sorted_df.slice(i * n_cols, n_cols) for i in range(n_rows)]
+
+    row_height = 100.0 / n_rows
     color_norm = Normalize(vmin=-COLOR_LIMIT, vmax=COLOR_LIMIT)
 
-    for ind, rect in zip(industries.iter_rows(named=True), rects):
-        chg = ind["weighted_chg"]
-        clamped = max(-COLOR_LIMIT, min(COLOR_LIMIT, chg))
-        color = RED_GREEN_CMAP(color_norm(clamped))
+    for row_idx, row_df in enumerate(rows):
+        # 行内再按 turnover 降序：保证左边是行内最大成交额
+        row_df = row_df.sort("total_turnover", descending=True)
+        row_total = row_df["total_turnover"].sum()
+        if row_total <= 0:
+            continue
 
-        ax.add_patch(Rectangle(
-            (rect["x"], rect["y"]), rect["dx"], rect["dy"],
-            facecolor=color, edgecolor="white", linewidth=1.5, zorder=2,
-        ))
+        y_top = 100.0 - row_idx * row_height
+        y_bot = y_top - row_height
 
-        # 文字：根据方块大小决定显示密度
-        area = rect["dx"] * rect["dy"]
-        if area < 0.3:
-            continue  # 太小不标
-        txt_color = "white" if abs(chg) > 0.04 else "#1a1a1a"
-        center_x = rect["x"] + rect["dx"] / 2
-        center_y = rect["y"] + rect["dy"] / 2
+        x = 0.0
+        for ind in row_df.iter_rows(named=True):
+            w = ind["total_turnover"] / row_total * 100.0
+            chg = ind["weighted_chg"]
+            clamped = max(-COLOR_LIMIT, min(COLOR_LIMIT, chg))
+            color = RED_GREEN_CMAP(color_norm(clamped))
 
-        turnover_yi = ind["total_turnover"] / 1e8
-        if area > 15:
-            # 大方块：行业名 + 涨幅 + 成交额 + 股票数
-            ax.text(center_x, center_y + rect["dy"] * 0.18,
-                    ind["industry"], ha="center", va="center",
-                    fontsize=14, fontweight="bold", color=txt_color, zorder=3)
-            ax.text(center_x, center_y,
-                    f"{chg*100:+.2f}%", ha="center", va="center",
-                    fontsize=20, fontweight="bold", color=txt_color, zorder=3)
-            ax.text(center_x, center_y - rect["dy"] * 0.18,
-                    f"{turnover_yi:.0f}亿  ({ind['count']}只)",
-                    ha="center", va="center",
-                    fontsize=10, color=txt_color, zorder=3)
-        elif area > 4:
-            ax.text(center_x, center_y + rect["dy"] * 0.12,
-                    ind["industry"], ha="center", va="center",
-                    fontsize=10, fontweight="bold", color=txt_color, zorder=3)
-            ax.text(center_x, center_y - rect["dy"] * 0.12,
-                    f"{chg*100:+.2f}%  {turnover_yi:.0f}亿",
-                    ha="center", va="center",
-                    fontsize=9, color=txt_color, zorder=3)
-        elif area > 1:
-            ax.text(center_x, center_y,
-                    f"{ind['industry']}\n{chg*100:+.2f}%",
-                    ha="center", va="center",
-                    fontsize=8, color=txt_color, zorder=3)
-        else:
-            ax.text(center_x, center_y,
-                    ind["industry"], ha="center", va="center",
-                    fontsize=6.5, color=txt_color, zorder=3)
+            ax.add_patch(Rectangle(
+                (x, y_bot), w, row_height,
+                facecolor=color, edgecolor="white", linewidth=1.2, zorder=2,
+            ))
 
+            txt_color = "white" if abs(chg) > 0.04 else "#1a1a1a"
+            turnover_yi = ind["total_turnover"] / 1e8
+            cx = x + w / 2
+            cy = (y_top + y_bot) / 2
+
+            if w > 8:
+                ax.text(cx, cy + row_height * 0.27, ind["industry"],
+                        ha="center", va="center", fontsize=11, fontweight="bold",
+                        color=txt_color, zorder=3)
+                ax.text(cx, cy, f"{chg*100:+.2f}%",
+                        ha="center", va="center", fontsize=15, fontweight="bold",
+                        color=txt_color, zorder=3)
+                ax.text(cx, cy - row_height * 0.27, f"{turnover_yi:.0f}亿",
+                        ha="center", va="center", fontsize=9.5,
+                        color=txt_color, zorder=3)
+            elif w > 4:
+                ax.text(cx, cy + row_height * 0.17, ind["industry"],
+                        ha="center", va="center", fontsize=9, fontweight="bold",
+                        color=txt_color, zorder=3)
+                ax.text(cx, cy - row_height * 0.17, f"{chg*100:+.2f}%  {turnover_yi:.0f}亿",
+                        ha="center", va="center", fontsize=8,
+                        color=txt_color, zorder=3)
+            elif w > 1.8:
+                ax.text(cx, cy, f"{ind['industry']}\n{chg*100:+.2f}%",
+                        ha="center", va="center", fontsize=7.5,
+                        color=txt_color, zorder=3)
+            elif w > 0.6:
+                ax.text(cx, cy, ind["industry"],
+                        ha="center", va="center", fontsize=6.5,
+                        color=txt_color, zorder=3)
+
+            x += w
+
+    # 左侧垂直 colorbar
+    cax = fig.add_axes([0.012, 0.15, 0.028, 0.7])
     sm = plt.cm.ScalarMappable(cmap=RED_GREEN_CMAP, norm=color_norm)
     sm.set_array([])
-    cbar = fig.colorbar(sm, ax=ax, orientation="horizontal",
-                        fraction=0.025, pad=0.02, aspect=50)
+    cbar = fig.colorbar(sm, cax=cax, orientation="vertical")
     cbar.set_label("成交额加权涨跌幅", fontsize=10)
     ticks = [-0.05, -0.03, -0.01, 0, 0.01, 0.03, 0.05]
     cbar.set_ticks(ticks)
@@ -195,7 +214,7 @@ def render(industries: pl.DataFrame, target_date: str, level: int, output: Path)
     output.parent.mkdir(parents=True, exist_ok=True)
     fig.savefig(output, dpi=120, bbox_inches="tight", facecolor="white")
     plt.close(fig)
-    print(f"Saved: {output}")
+    print(f"Saved: {output}  (layout: {n_rows} 行 × {n_cols} 列)")
 
 
 def main() -> None:
@@ -206,7 +225,7 @@ def main() -> None:
     parser.add_argument("--date", type=str, default=None,
                         help="目标日期 YYYY-MM-DD（默认最新完整数据）")
     parser.add_argument("--level", type=int, default=3, choices=[1, 2, 3, 4],
-                        help="行业层级：1=一级(约11类), 2=二级(约35), 3=三级(约90), 4=四级(约200)")
+                        help="行业层级：1=一级(约11类), 2=二级(约35), 3=三级(约94), 4=四级(约200)")
     parser.add_argument("--data-path", type=Path, default=Path("/mnt/readonly_dataset"),
                         help="只读原始数据根目录")
     parser.add_argument("--output", type=Path, default=None,
@@ -223,17 +242,14 @@ def main() -> None:
     quote = load_quote(args.data_path, target_date)
     print(f"行情: {quote.height} 条")
 
-    # 关联行情 + 行业
     df = quote.join(industry_map, on="code", how="inner")
     print(f"匹配到行业: {df.height} / {quote.height} 条")
 
-    # 按行业聚合：总成交额 + 成交额加权涨幅
     industries = (
         df.group_by("industry")
         .agg([
             pl.col("turnover").sum().alias("total_turnover"),
             (pl.col("pct_chg") * pl.col("turnover")).sum().alias("_weighted_sum"),
-            pl.len().alias("count"),
         ])
         .with_columns(
             (pl.col("_weighted_sum") / pl.col("total_turnover")).alias("weighted_chg"),
