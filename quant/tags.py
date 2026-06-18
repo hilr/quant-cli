@@ -75,11 +75,68 @@ def tag_limit_up(
     )
 
 
+# ===== 通道/策略用 tag（时序口径，只需 close）=====
+DEFAULT_BOLL_WINDOW = 120
+DEFAULT_BOLL_K = 1.5
+
+
+def tag_boll_lower(
+    df: pl.DataFrame,
+    window: int = DEFAULT_BOLL_WINDOW,
+    k: float = DEFAULT_BOLL_K,
+) -> pl.DataFrame:
+    """close ≤ MA(window) − k·σ(window)：触及布林带下轨（买入候选）。"""
+    out = df.sort("date")
+    out = out.with_columns(
+        pl.col("close").rolling_mean(window).alias("_ma"),
+        pl.col("close").rolling_std(window).alias("_sigma"),
+    ).with_columns(
+        (pl.col("_ma") - k * pl.col("_sigma")).alias("_lower")
+    ).with_columns(
+        (pl.col("close") <= pl.col("_lower")).fill_null(False).alias("tag_boll_lower")
+    )
+    return out.drop(["_ma", "_sigma", "_lower"])
+
+
+def tag_boll_upper_touch(
+    df: pl.DataFrame,
+    window: int = DEFAULT_BOLL_WINDOW,
+    k: float = DEFAULT_BOLL_K,
+) -> pl.DataFrame:
+    """close ≥ MA(window) + k·σ(window)：触及布林带上轨（卖出候选）。"""
+    out = df.sort("date")
+    out = out.with_columns(
+        pl.col("close").rolling_mean(window).alias("_ma"),
+        pl.col("close").rolling_std(window).alias("_sigma"),
+    ).with_columns(
+        (pl.col("_ma") + k * pl.col("_sigma")).alias("_upper")
+    ).with_columns(
+        (pl.col("close") >= pl.col("_upper")).fill_null(False).alias("tag_boll_upper_touch")
+    )
+    return out.drop(["_ma", "_sigma", "_upper"])
+
+
+def tag_rising_ma(
+    df: pl.DataFrame,
+    window: int = DEFAULT_BOLL_WINDOW,
+) -> pl.DataFrame:
+    """MA(window) 上行：MA[t] > MA[t-1]。常作为买入 tag 的组合过滤。"""
+    out = df.sort("date").with_columns(
+        pl.col("close").rolling_mean(window).alias("_ma")
+    ).with_columns(
+        (pl.col("_ma") > pl.col("_ma").shift(1)).fill_null(False).alias("tag_rising_ma")
+    )
+    return out.drop("_ma")
+
+
 # tag 名 → 函数（filter_by_tags 用这个名字查 tag）
 TAG_FUNCS = {
     "surge_3d": tag_surge_3d,
     "volume_spike": tag_volume_spike,
     "limit_up": tag_limit_up,
+    "boll_lower": tag_boll_lower,
+    "boll_upper_touch": tag_boll_upper_touch,
+    "rising_ma": tag_rising_ma,
 }
 
 # 每个 tag 需要从 parquet 读的原始列（filter_by_tags 按需读，避免读全表）
@@ -87,6 +144,9 @@ TAG_REQUIRED_COLUMNS = {
     "surge_3d": ["date", "code", "close", "prev_close", "market_cap"],
     "volume_spike": ["date", "code", "turnover", "turnover_ma20", "market_cap"],
     "limit_up": ["date", "code", "close", "prev_close", "market_cap"],
+    "boll_lower": ["date", "code", "close"],
+    "boll_upper_touch": ["date", "code", "close"],
+    "rising_ma": ["date", "code", "close"],
 }
 
 

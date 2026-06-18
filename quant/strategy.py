@@ -3,6 +3,7 @@
 存放可复用的策略回测。当前包含：
 
 - ``run_momentum_strategy`` —— CSI300/CSI500/创业板50 月度动量轮动
+- ``run_signal_strategy`` —— 通用 tag 信号驱动回测（买入/卖出各为一个 Signal，不对称）
 """
 from __future__ import annotations
 
@@ -295,3 +296,116 @@ def run_ma_crossover_strategy(
         plt.close(fig)
 
     return stats
+
+
+def run_signal_strategy(
+    df: pl.DataFrame,
+    buy: "Signal",
+    sell: "Signal",
+    stop: "Stop | None" = None,
+) -> tuple[pl.DataFrame, list, list]:
+    """通用 tag 信号驱动回测。
+
+    - ``buy`` / ``sell``：各自一个 ``Signal``（多个 tag 经 combiner 合成），互相独立、不对称。
+    - ``stop``：可选的有状态离场（``Stop`` trail/breakdown），与 ``sell`` 成 OR。
+    - 所有信号 T-1 决定 T 持仓，避免未来函数；纯数学模拟，无交易成本。
+
+    Returns:
+        (out, entries, exits)
+        - out: 含 position / strategy_nav / bnh_nav 列的 df（保留传入列 + 通道带列）
+        - entries: [(date, price, tag), ...]
+        - exits: [(date, price), ...]
+    """
+    from quant.signals import Stop, eval_signal
+
+    df = df.sort("date")
+    buy_col = eval_signal(df, buy)
+    sell_col = (
+        eval_signal(df, sell)
+        if (sell is not None and sell.tags)
+        else pl.Series("_sell", [False] * df.height)
+    )
+    df = df.with_columns(buy_col.alias("_buy"), sell_col.alias("_sell"))
+
+    if stop is not None and stop.kind == "trail":
+        df = df.with_columns(pl.col("close").rolling_std(stop.window).alias("_sigma"))
+    if stop is not None and stop.kind == "breakdown":
+        df = df.with_columns(
+            pl.col("close").rolling_mean(stop.window).alias("_ma"),
+            pl.col("close").rolling_std(stop.window).alias("_sigma"),
+        ).with_columns(
+            (pl.col("_ma") + stop.k * pl.col("_sigma")).alias("_upper")
+        )
+
+    dates = df["date"].to_list()
+    closes = df["close"].to_list()
+    highs = df["high"].to_list()
+    buy_l = df["_buy"].to_list()
+    sell_l = df["_sell"].to_list()
+    sigma_l = df["_sigma"].to_list() if "_sigma" in df.columns else [None] * df.height
+    upper_l = df["_upper"].to_list() if "_upper" in df.columns else [None] * df.height
+    n = df.height
+
+    pos = [0.0] * n
+    entries: list[tuple] = []
+    exits: list[tuple] = []
+    in_pos = False
+    peak = 0.0
+    above_upper = False
+    below_count = 0
+    for t in range(1, n):
+        b = buy_l[t - 1]
+        s = sell_l[t - 1]
+        cp = closes[t - 1]
+        hp = highs[t - 1]
+        sg = sigma_l[t - 1]
+        ub = upper_l[t - 1]
+
+        if in_pos and stop is not None and stop.kind == "trail":
+            peak = max(peak, hp)
+
+        exit_now = False
+        if in_pos:
+            if s:
+                exit_now = True  # tag 卖出信号
+            elif stop is not None:
+                if stop.kind == "trail":
+                    if sg is not None and cp < peak - stop.m * sg:
+                        exit_now = True
+                elif stop.kind == "breakdown":
+                    if ub is not None:
+                        if cp >= ub:
+                            above_upper = True
+                            below_count = 0
+                        elif above_upper:
+                            below_count += 1
+                            if below_count >= stop.confirm:
+                                exit_now = True
+
+        if exit_now:
+            in_pos = False
+            above_upper = False
+            below_count = 0
+            exits.append((dates[t - 1], cp))
+        elif not in_pos:
+            if b:
+                in_pos = True
+                peak = hp
+                above_upper = False
+                below_count = 0
+                entries.append((dates[t - 1], cp, "buy"))
+        pos[t] = 1.0 if in_pos else 0.0
+
+    nav = [1.0] * n
+    bh = [1.0] * n
+    for t in range(1, n):
+        r = closes[t] / closes[t - 1] - 1.0
+        nav[t] = nav[t - 1] * (1.0 + pos[t] * r)
+        bh[t] = bh[t - 1] * (1.0 + r)
+
+    out = df.with_columns(
+        pl.Series("position", pos),
+        pl.Series("strategy_nav", nav),
+        pl.Series("bnh_nav", bh),
+    )
+    return out, entries, exits
