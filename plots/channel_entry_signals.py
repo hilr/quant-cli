@@ -1,8 +1,8 @@
-"""通道策略入场信号图：下轨买入点 + 前瞻收益 / 回撤标注（不含离场信号）。
+"""通道策略入场信号图：下轨买入点 + 前瞻收益 / 跌幅标注（不含离场信号）。
 
 复用 channel_backtest 的下轨入场逻辑（close ≤ MA(window) − k·σ），
 画出价格通道，标记每一个买入点（绿色三角），并在其上方标注
-此后 N 个交易日（默认 63 ≈ 3 个月）的收益率与窗口内最大回撤，
+此后 N 个交易日（默认 60 ≈ 3 个月）的收益率与窗口内最大跌幅，
 直观评估入场信号质量。
 """
 from __future__ import annotations
@@ -50,7 +50,7 @@ def main() -> None:
     lower = out["lower"].to_list()[first:]
     date_idx = {d: i for i, d in enumerate(dates_all)}
 
-    # 每个买入点的前瞻收益 + 窗口内最大回撤 + 见底天数
+    # 每个买入点的前瞻收益 + 窗口内最大跌幅 + 见底天数
     fwd: list[tuple] = []
     for d, price, _tag in entries:
         i = date_idx[d]
@@ -70,7 +70,7 @@ def main() -> None:
             mx_gain = 0.0
             t_peak = 0
             for k, c in enumerate(seg):
-                dd = c / price - 1  # 相对入场价回撤
+                dd = c / price - 1  # 相对入场价的跌幅
                 if dd < mdd:
                     mdd = dd
                     t_bot = k
