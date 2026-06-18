@@ -20,6 +20,7 @@ from pathlib import Path
 
 import matplotlib.pyplot as plt
 import polars as pl
+import squarify
 from matplotlib.colors import LinearSegmentedColormap, Normalize
 from matplotlib.patches import Rectangle
 
@@ -109,14 +110,62 @@ def pick_latest_full_date(data_path: Path) -> str:
     raise RuntimeError(f"找不到行数 >= {MIN_FULL_ROWS} 的完整行情文件")
 
 
+def _draw_block(ax, x: float, y: float, w: float, h: float, ind: dict, color_norm) -> None:
+    """画一个行业方块 + 文字。文字密度按方块大小自适应。"""
+    chg = ind["weighted_chg"]
+    clamped = max(-COLOR_LIMIT, min(COLOR_LIMIT, chg))
+    color = RED_GREEN_CMAP(color_norm(clamped))
+    ax.add_patch(Rectangle(
+        (x, y), w, h,
+        facecolor=color, edgecolor="white", linewidth=1.0, zorder=2,
+    ))
+    if w < 0.4 or h < 1.0:
+        return  # 太小不画文字
+
+    txt_color = "white" if abs(chg) > 0.04 else "#1a1a1a"
+    turnover_yi = ind["total_turnover"] / 1e8
+    cx = x + w / 2
+    cy = y + h / 2
+
+    # 文字密度按面积分档
+    if w > 8 and h > 6:
+        ax.text(cx, y + h * 0.72, ind["industry"],
+                ha="center", va="center", fontsize=11, fontweight="bold",
+                color=txt_color, zorder=3)
+        ax.text(cx, cy, f"{chg*100:+.2f}%",
+                ha="center", va="center", fontsize=15, fontweight="bold",
+                color=txt_color, zorder=3)
+        ax.text(cx, y + h * 0.18, f"{turnover_yi:.0f}亿",
+                ha="center", va="center", fontsize=9.5,
+                color=txt_color, zorder=3)
+    elif w > 4 and h > 4:
+        ax.text(cx, y + h * 0.68, ind["industry"],
+                ha="center", va="center", fontsize=9, fontweight="bold",
+                color=txt_color, zorder=3)
+        ax.text(cx, y + h * 0.28, f"{chg*100:+.2f}%  {turnover_yi:.0f}亿",
+                ha="center", va="center", fontsize=8,
+                color=txt_color, zorder=3)
+    elif w > 2 and h > 2:
+        ax.text(cx, cy, f"{ind['industry']}\n{chg*100:+.2f}%",
+                ha="center", va="center", fontsize=7.5,
+                color=txt_color, zorder=3)
+    elif w > 0.8 and h > 1.5:
+        ax.text(cx, cy, ind["industry"],
+                ha="center", va="center", fontsize=6.5,
+                color=txt_color, zorder=3)
+    elif w > 0.5:
+        ax.text(cx, cy, ind["industry"][:2],
+                ha="center", va="center", fontsize=5.5,
+                color=txt_color, zorder=3)
+
+
 def render(industries: pl.DataFrame, target_date: str, level: int, output: Path) -> None:
-    """二维矩阵渲染：行=涨幅 tier，列=行业按 turnover 降序。"""
+    """二维矩阵渲染：行=涨幅 tier；行内头部横向排、尾部 squarify 打包。"""
     plt.rcParams["font.sans-serif"] = CJK_FONTS
     plt.rcParams["axes.unicode_minus"] = False
 
     fig = plt.figure(figsize=(22, 13), dpi=120)
     fig.patch.set_facecolor("white")
-    # 左侧 6% 留给 colorbar
     ax = fig.add_axes([0.06, 0.05, 0.93, 0.88])
     ax.set_xlim(0, 100)
     ax.set_ylim(0, 100)
@@ -129,15 +178,13 @@ def render(industries: pl.DataFrame, target_date: str, level: int, output: Path)
     fig.text(
         0.525, 0.965,
         f"行业全景热力图 · {target_date} · 中证{level_name}行业 · 全 A 股\n"
-        f"行 = 涨幅 tier（顶高底低）  列 = 行内成交额降序（左高）  "
+        f"行 = 涨幅 tier（顶高底低）  列 = 行内成交额降序（左高，尾部 squarify 打包）  "
         f"共 {industries.height} 个行业（涨 {up} / 跌 {down}），总成交额 {total_turnover_yi:.0f} 亿",
         ha="center", va="top", fontsize=13,
     )
 
-    # 按 gain desc 排序后切分成行（tier）
     sorted_df = industries.sort("weighted_chg", descending=True)
     n = sorted_df.height
-    # 行列数按图幅宽高比自适应（宽:高 ≈ 1.7）
     aspect = 1.7
     n_rows = max(1, int(round(math.sqrt(n / aspect))))
     n_cols = math.ceil(n / n_rows)
@@ -146,8 +193,10 @@ def render(industries: pl.DataFrame, target_date: str, level: int, output: Path)
     row_height = 100.0 / n_rows
     color_norm = Normalize(vmin=-COLOR_LIMIT, vmax=COLOR_LIMIT)
 
+    # 头部 N 个横向铺开，剩下的 squarify 打包到右侧
+    head_count = max(2, min(4, n_cols // 4))
+
     for row_idx, row_df in enumerate(rows):
-        # 行内再按 turnover 降序：保证左边是行内最大成交额
         row_df = row_df.sort("total_turnover", descending=True)
         row_total = row_df["total_turnover"].sum()
         if row_total <= 0:
@@ -156,50 +205,35 @@ def render(industries: pl.DataFrame, target_date: str, level: int, output: Path)
         y_top = 100.0 - row_idx * row_height
         y_bot = y_top - row_height
 
+        if row_df.height <= head_count + 1:
+            # 数量少就直接全横向铺
+            x = 0.0
+            for ind in row_df.iter_rows(named=True):
+                w = ind["total_turnover"] / row_total * 100.0
+                _draw_block(ax, x, y_bot, w, row_height, ind, color_norm)
+                x += w
+            continue
+
+        head_df = row_df.head(head_count)
+        tail_df = row_df.tail(row_df.height - head_count)
+        head_total = head_df["total_turnover"].sum()
+        head_width = head_total / row_total * 100.0
+        tail_width = 100.0 - head_width
+
+        # 头部：横向铺
         x = 0.0
-        for ind in row_df.iter_rows(named=True):
+        for ind in head_df.iter_rows(named=True):
             w = ind["total_turnover"] / row_total * 100.0
-            chg = ind["weighted_chg"]
-            clamped = max(-COLOR_LIMIT, min(COLOR_LIMIT, chg))
-            color = RED_GREEN_CMAP(color_norm(clamped))
-
-            ax.add_patch(Rectangle(
-                (x, y_bot), w, row_height,
-                facecolor=color, edgecolor="white", linewidth=1.2, zorder=2,
-            ))
-
-            txt_color = "white" if abs(chg) > 0.04 else "#1a1a1a"
-            turnover_yi = ind["total_turnover"] / 1e8
-            cx = x + w / 2
-            cy = (y_top + y_bot) / 2
-
-            if w > 8:
-                ax.text(cx, cy + row_height * 0.27, ind["industry"],
-                        ha="center", va="center", fontsize=11, fontweight="bold",
-                        color=txt_color, zorder=3)
-                ax.text(cx, cy, f"{chg*100:+.2f}%",
-                        ha="center", va="center", fontsize=15, fontweight="bold",
-                        color=txt_color, zorder=3)
-                ax.text(cx, cy - row_height * 0.27, f"{turnover_yi:.0f}亿",
-                        ha="center", va="center", fontsize=9.5,
-                        color=txt_color, zorder=3)
-            elif w > 4:
-                ax.text(cx, cy + row_height * 0.17, ind["industry"],
-                        ha="center", va="center", fontsize=9, fontweight="bold",
-                        color=txt_color, zorder=3)
-                ax.text(cx, cy - row_height * 0.17, f"{chg*100:+.2f}%  {turnover_yi:.0f}亿",
-                        ha="center", va="center", fontsize=8,
-                        color=txt_color, zorder=3)
-            elif w > 1.8:
-                ax.text(cx, cy, f"{ind['industry']}\n{chg*100:+.2f}%",
-                        ha="center", va="center", fontsize=7.5,
-                        color=txt_color, zorder=3)
-            elif w > 0.6:
-                ax.text(cx, cy, ind["industry"],
-                        ha="center", va="center", fontsize=6.5,
-                        color=txt_color, zorder=3)
-
+            _draw_block(ax, x, y_bot, w, row_height, ind, color_norm)
             x += w
+
+        # 尾部：squarify 在右侧 (head_width, y_bot, tail_width, row_height) 区域打包
+        tail_sizes = tail_df["total_turnover"].to_list()
+        if tail_width > 1.0 and sum(tail_sizes) > 0:
+            norm_sizes = squarify.normalize_sizes(tail_sizes, tail_width, row_height)
+            tail_rects = squarify.squarify(norm_sizes, head_width, y_bot, tail_width, row_height)
+            for rect, ind in zip(tail_rects, tail_df.iter_rows(named=True)):
+                _draw_block(ax, rect["x"], rect["y"], rect["dx"], rect["dy"], ind, color_norm)
 
     # 左侧垂直 colorbar
     cax = fig.add_axes([0.012, 0.15, 0.028, 0.7])
@@ -214,7 +248,7 @@ def render(industries: pl.DataFrame, target_date: str, level: int, output: Path)
     output.parent.mkdir(parents=True, exist_ok=True)
     fig.savefig(output, dpi=120, bbox_inches="tight", facecolor="white")
     plt.close(fig)
-    print(f"Saved: {output}  (layout: {n_rows} 行 × {n_cols} 列)")
+    print(f"Saved: {output}  (layout: {n_rows} 行 × {n_cols} 列, head={head_count})")
 
 
 def main() -> None:
