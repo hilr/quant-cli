@@ -235,8 +235,8 @@ def main() -> None:
     )
     parser.add_argument("--date", type=str, default=None,
                         help="目标日期 YYYY-MM-DD（默认最新完整数据）")
-    parser.add_argument("--level", type=int, default=1, choices=[1, 2, 3],
-                        help="行业层级：1=一级(约11类), 2=二级, 3=三级")
+    parser.add_argument("--level", type=int, default=2, choices=[1, 2, 3],
+                        help="行业层级：1=一级(约11类), 2=二级(约35类), 3=三级")
     parser.add_argument("--data-path", type=Path, default=Path("/mnt/readonly_dataset"),
                         help="只读原始数据根目录")
     parser.add_argument("--output", type=Path, default=None,

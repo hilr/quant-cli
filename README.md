@@ -54,11 +54,11 @@
 finviz 风格的市场全景热力图：方块按中证行业聚集，方块大小 ∝ 当日成交额，颜色 ∝ 当日涨幅（A股惯例红涨绿跌）。范围限定 HS300 + CSI500 成分股（约 800 只）。
 
 ```bash
-# 最新交易日（自动跳过残缺尾段），中证一级行业
+# 最新交易日（自动跳过残缺尾段），中证二级行业
 uv run python plots/industry_heatmap.py
 
-# 中证二级行业
-uv run python plots/industry_heatmap.py --level 2
+# 中证一级行业（更聚合）
+uv run python plots/industry_heatmap.py --level 1
 
 # 指定日期
 uv run python plots/industry_heatmap.py --date 2025-10-30
@@ -67,7 +67,7 @@ uv run python plots/industry_heatmap.py --date 2025-10-30
 | 参数 | 说明 | 默认 |
 |------|------|------|
 | `--date` | 目标日期 YYYY-MM-DD | 最新行数 ≥ 4000 的交易日 |
-| `--level` | 行业层级 1/2/3 | 1（中证一级，约 11 类） |
+| `--level` | 行业层级 1/2/3 | 2（中证二级，约 35 类） |
 | `--data-path` | 只读原始数据根目录 | /mnt/readonly_dataset |
 | `--output` | 输出 PNG 路径 | /mnt/dataset/industry_heatmap_{date}_l{level}.png |
 
