@@ -178,62 +178,22 @@ def render(industries: pl.DataFrame, target_date: str, level: int, output: Path)
     fig.text(
         0.525, 0.965,
         f"行业全景热力图 · {target_date} · 中证{level_name}行业 · 全 A 股\n"
-        f"行 = 涨幅 tier（顶高底低）  列 = 行内成交额降序（左高，尾部 squarify 打包）  "
+        f"排序：(加权涨幅 desc, 成交额 desc) → 左上=大涨 + 大成交额  方块面积 ∝ 成交额  "
         f"共 {industries.height} 个行业（涨 {up} / 跌 {down}），总成交额 {total_turnover_yi:.0f} 亿",
         ha="center", va="top", fontsize=13,
     )
 
-    sorted_df = industries.sort("weighted_chg", descending=True)
-    n = sorted_df.height
-    aspect = 1.7
-    n_rows = max(1, int(round(math.sqrt(n / aspect))))
-    n_cols = math.ceil(n / n_rows)
-    rows = [sorted_df.slice(i * n_cols, n_cols) for i in range(n_rows)]
-
-    row_height = 100.0 / n_rows
+    # 全局 squarify，按 (加权涨幅 desc, 成交额 desc) 排序。
+    # 不严格按 tier 分行，允许相邻 tier 自然混排补位（更紧凑）。
+    # 排序保证最大涨幅 + 大成交额的行业落在左上角；末尾跌幅大且成交额大的在右下角。
     color_norm = Normalize(vmin=-COLOR_LIMIT, vmax=COLOR_LIMIT)
+    sorted_df = industries.sort(["weighted_chg", "total_turnover"], descending=[True, True])
+    sizes = sorted_df["total_turnover"].to_list()
+    norm_sizes = squarify.normalize_sizes(sizes, 100, 100)
+    rects = squarify.squarify(norm_sizes, 0, 0, 100, 100)
 
-    # 头部 N 个横向铺开，剩下的 squarify 打包到右侧
-    head_count = max(2, min(4, n_cols // 4))
-
-    for row_idx, row_df in enumerate(rows):
-        row_df = row_df.sort("total_turnover", descending=True)
-        row_total = row_df["total_turnover"].sum()
-        if row_total <= 0:
-            continue
-
-        y_top = 100.0 - row_idx * row_height
-        y_bot = y_top - row_height
-
-        if row_df.height <= head_count + 1:
-            # 数量少就直接全横向铺
-            x = 0.0
-            for ind in row_df.iter_rows(named=True):
-                w = ind["total_turnover"] / row_total * 100.0
-                _draw_block(ax, x, y_bot, w, row_height, ind, color_norm)
-                x += w
-            continue
-
-        head_df = row_df.head(head_count)
-        tail_df = row_df.tail(row_df.height - head_count)
-        head_total = head_df["total_turnover"].sum()
-        head_width = head_total / row_total * 100.0
-        tail_width = 100.0 - head_width
-
-        # 头部：横向铺
-        x = 0.0
-        for ind in head_df.iter_rows(named=True):
-            w = ind["total_turnover"] / row_total * 100.0
-            _draw_block(ax, x, y_bot, w, row_height, ind, color_norm)
-            x += w
-
-        # 尾部：squarify 在右侧 (head_width, y_bot, tail_width, row_height) 区域打包
-        tail_sizes = tail_df["total_turnover"].to_list()
-        if tail_width > 1.0 and sum(tail_sizes) > 0:
-            norm_sizes = squarify.normalize_sizes(tail_sizes, tail_width, row_height)
-            tail_rects = squarify.squarify(norm_sizes, head_width, y_bot, tail_width, row_height)
-            for rect, ind in zip(tail_rects, tail_df.iter_rows(named=True)):
-                _draw_block(ax, rect["x"], rect["y"], rect["dx"], rect["dy"], ind, color_norm)
+    for rect, ind in zip(rects, sorted_df.iter_rows(named=True)):
+        _draw_block(ax, rect["x"], rect["y"], rect["dx"], rect["dy"], ind, color_norm)
 
     # 左侧垂直 colorbar
     cax = fig.add_axes([0.012, 0.15, 0.028, 0.7])
@@ -248,7 +208,7 @@ def render(industries: pl.DataFrame, target_date: str, level: int, output: Path)
     output.parent.mkdir(parents=True, exist_ok=True)
     fig.savefig(output, dpi=120, bbox_inches="tight", facecolor="white")
     plt.close(fig)
-    print(f"Saved: {output}  (layout: {n_rows} 行 × {n_cols} 列, head={head_count})")
+    print(f"Saved: {output}  (global squarify, {industries.height} 个行业)")
 
 
 def main() -> None:
