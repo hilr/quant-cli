@@ -31,7 +31,7 @@ CSI300 自 2024-09-24 政策利好引爆后的牛市段（415 个交易日）：
 
 - 数据：`/mnt/dataset/csi300_regime/zigzag_t15_segments.csv`
 - 图：`/mnt/dataset/csi300_zigzag.png`
-- 脚本：`/tmp/zigzag_csi300.py`
+- 脚本：[`research/csi300_regime_threshold/01_zigzag_segment.py`](../../research/csi300_regime_threshold/01_zigzag_segment.py)
 
 主要波段都对上了：2005-06~2007-05 大牛市（+410%）、2008 金融危机（−53%）、2014-2015 杠杆牛（+156%）、2024-2026 当前牛市（+39%）。
 
@@ -40,7 +40,7 @@ CSI300 自 2024-09-24 政策利好引爆后的牛市段（415 个交易日）：
 按段切开计算 mean/std/skew/kurt。
 
 - 数据：`/mnt/dataset/csi300_regime/zigzag_t15_segment_stats.csv`
-- 脚本：`/tmp/zigzag_segment_stats.py`
+- 脚本：[`research/csi300_regime_threshold/02_segment_return_stats.py`](../../research/csi300_regime_threshold/02_segment_return_stats.py)
 
 **Bull vs Bear 段内日收益率分布**：
 
@@ -87,14 +87,14 @@ mean=+0.095  std=1.446  skew=+0.076  kurt=−0.88（扁峰！）
 → 在 BB 通道上简单用 `−kσ` 会**系统性少买**，因为真实分布比正态"集中"。
 
 - 图：`/mnt/dataset/threshold_compare_000300.png`
-- 脚本：`/tmp/threshold_compare.py`
+- 脚本：[`research/csi300_regime_threshold/04_threshold_compare.py`](../../research/csi300_regime_threshold/04_threshold_compare.py)
 
 ### Step 6：z_obs 按 regime 切开
 
 把 z_obs 按 zigzag 切的 bull/bear 段分组重新算分布。
 
 - 数据：`/mnt/dataset/csi300_regime/zobs_by_segment.csv`
-- 脚本：`/tmp/zobs_by_regime.py`
+- 脚本：[`research/csi300_regime_threshold/03_zobs_by_regime.py`](../../research/csi300_regime_threshold/03_zobs_by_regime.py)
 
 **Bull vs Bear z_obs 分布差异巨大**：
 
@@ -124,7 +124,7 @@ mean=+0.095  std=1.446  skew=+0.076  kurt=−0.88（扁峰！）
 
 per_regime 在 bull/bear 段各自命中 ~1% 天数（bull 1.01%、bear 0.92%），校准目标达成。
 
-- 脚本：`/tmp/regime_threshold_backtest.py`
+- 脚本：[`research/csi300_regime_threshold/05_regime_threshold_backtest.py`](../../research/csi300_regime_threshold/05_regime_threshold_backtest.py)
 
 ## 核心结论
 
