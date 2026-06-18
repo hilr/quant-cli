@@ -35,7 +35,7 @@ def main() -> None:
         .sort("date")
     )
     out, entries, _exits = run_backtest(
-        df, args.window, args.k, False, "trail", 1, 0, 1.5,
+        df, args.window, args.k, False, "trail", 1, 1.5,
     )
 
     ma_full = out["ma"].to_list()

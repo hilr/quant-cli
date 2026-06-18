@@ -2,28 +2,40 @@
 
 通道：center = MA(window)，upper = MA + k·σ，lower = MA − k·σ。
   - 通道随 MA 上行而上升（捕捉趋势斜率），带宽随波动自适应。
-信号（T-1 决定 T 持仓，避免未来函数）：
-  - 买入：close <= 下轨（区间下沿超卖）
-  - 卖出（breakdown，默认）：close 先收盘站上上轨、之后首次收盘跌回上轨之下
-  - 卖出（touch）：close >= 上轨（触及即卖）
-  - 可选 --rising-ma：仅当 MA 上行时才按下轨买入，过滤通道破位
-binary 进出，无分档；纯数学模拟，无交易成本。
+
+架构：买入/卖出分离的 Signal 层（见 quant/signals.py + quant/strategy.run_signal_strategy）
+  - 买入 Signal：close ≤ 下轨（tag_boll_lower）；可选叠加 tag_rising_ma（MA 上行过滤）
+  - 卖出按 --exit-mode：
+      touch     → 卖出 Signal = tag_boll_upper_touch（触及上轨即卖）
+      breakdown → 有状态 Stop(kind=breakdown)：先站上上轨、后连续 confirm 日跌回上轨之下
+      trail     → 有状态 Stop(kind=trail)：close < 持仓峰值 − m·σ
+  - 实际卖出 = sell Signal OR 触及 Stop；买卖不对称、各自可多 tag 组合。
+信号 T-1 决定 T 持仓，避免未来函数；binary 进出，纯数学模拟无交易成本。
 """
 from __future__ import annotations
 
 import argparse
+import sys
 from pathlib import Path
 
 import matplotlib.dates as mdates
 import matplotlib.pyplot as plt
 import polars as pl
 
+# 作为脚本直接跑时，把项目根加入 path 以便 import quant
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
+
 
 def run_backtest(
     df: pl.DataFrame, window: int, k: float, rising_ma: bool,
     exit_mode: str = "breakdown",
-    confirm: int = 1, rebuy: int = 0, trail_m: float = 3.0,
+    confirm: int = 1, trail_m: float = 3.0,
 ) -> tuple[pl.DataFrame, list, list]:
+    """布林带通道策略：构造 buy/sell Signal + Stop，转交 run_signal_strategy。"""
+    from quant.signals import Signal, Stop, TagSpec
+    from quant.strategy import run_signal_strategy
+
+    # 挂通道带列（ma/sigma/upper/lower）供绘图与 Stop 复用
     df = (
         df.sort("date")
         .with_columns(
@@ -34,98 +46,25 @@ def run_backtest(
             (pl.col("ma") + k * pl.col("sigma")).alias("upper"),
             (pl.col("ma") - k * pl.col("sigma")).alias("lower"),
         )
-        .with_columns(pl.col("ma").shift(1).alias("ma_lag"))
     )
-    dates = df["date"].to_list()
-    closes = df["close"].to_list()
-    highs = df["high"].to_list()
-    upper = df["upper"].to_list()
-    lower = df["lower"].to_list()
-    sigma = df["sigma"].to_list()
-    ma_lag = df["ma_lag"].to_list()
-    ma = df["ma"].to_list()
-    n = df.height
 
-    pos = [0.0] * n
-    entries: list[tuple] = []   # (date, price, tag)
-    exits: list[tuple] = []     # (date, price)
-    in_pos = False
-    above_upper = False     # breakdown：是否已收盘站上上轨
-    below_count = 0         # breakdown confirm：连续收盘在上轨之下的天数
-    peak = 0.0              # trail：持仓期最高点
-    rebuy_left = 0          # rebuy：反手回买剩余天数
-    for t in range(1, n):
-        cp = closes[t - 1]
-        lb = lower[t - 1]
-        ub = upper[t - 1]
-        if cp is None or lb is None or ub is None:
-            pos[t] = 0.0
-            continue
-        sg = sigma[t - 1]
-        hp = highs[t - 1]
-        ma_rising = (ma[t - 1] is not None and ma_lag[t - 1] is not None
-                     and ma[t - 1] > ma_lag[t - 1])
+    buy_tags = [TagSpec("boll_lower", {"window": window, "k": k})]
+    if rising_ma:
+        buy_tags.append(TagSpec("rising_ma", {"window": window}))
+    buy = Signal(buy_tags, "all")
 
-        if in_pos and exit_mode == "trail":
-            peak = max(peak, hp)
+    if exit_mode == "touch":
+        sell = Signal([TagSpec("boll_upper_touch", {"window": window, "k": k})], "all")
+        stop = None
+    elif exit_mode == "trail":
+        sell = Signal([], "all")
+        stop = Stop(kind="trail", m=trail_m, window=window)
+    else:  # breakdown
+        sell = Signal([], "all")
+        stop = Stop(kind="breakdown", window=window, k=k, confirm=confirm)
 
-        exit_now = False
-        if in_pos:
-            if exit_mode == "trail":
-                if sg is not None and cp < peak - trail_m * sg:
-                    exit_now = True
-            elif exit_mode == "breakdown":
-                if cp >= ub:
-                    above_upper = True
-                    below_count = 0
-                elif above_upper:
-                    below_count += 1
-                    if below_count >= confirm:
-                        exit_now = True
-            else:  # touch
-                if cp >= ub:
-                    exit_now = True
-
-        if exit_now:
-            in_pos = False
-            above_upper = False
-            below_count = 0
-            exits.append((dates[t - 1], cp))
-            if rebuy > 0:
-                rebuy_left = rebuy
-        elif not in_pos:
-            entered = False
-            if rebuy_left > 0 and cp >= ub:
-                in_pos = True
-                peak = hp
-                above_upper = True
-                rebuy_left = 0
-                entries.append((dates[t - 1], cp, "rebuy"))
-                entered = True
-            elif cp <= lb and (ma_rising or not rising_ma):
-                in_pos = True
-                peak = hp
-                above_upper = False
-                rebuy_left = 0
-                entries.append((dates[t - 1], cp, "lower"))
-                entered = True
-            if not entered and rebuy_left > 0:
-                rebuy_left -= 1
-
-        pos[t] = 1.0 if in_pos else 0.0
-
-    nav = [1.0] * n
-    bh = [1.0] * n
-    for t in range(1, n):
-        r = closes[t] / closes[t - 1] - 1.0
-        nav[t] = nav[t - 1] * (1.0 + pos[t] * r)
-        bh[t] = bh[t - 1] * (1.0 + r)
-
-    out = df.with_columns(
-        pl.Series("position", pos),
-        pl.Series("strategy_nav", nav),
-        pl.Series("bnh_nav", bh),
-    )
+    out, entries, exits = run_signal_strategy(df, buy, sell, stop)
+    out = out.drop([c for c in out.columns if c.startswith("_")])
     return out, entries, exits
 
 
@@ -244,8 +183,6 @@ def main() -> None:
                    help="breakdown=突破上轨后跌回上轨之下才卖（默认）；touch=触及即卖；trail=移动止损")
     p.add_argument("--confirm", type=int, default=1,
                    help="breakdown 确认期：连续 N 日收盘在上轨之下才卖（1=原逻辑）")
-    p.add_argument("--rebuy", type=int, default=0,
-                   help="反手回买：卖出后 K 日内重新收盘站上上轨则买回（0=关闭）")
     p.add_argument("--trail-m", type=float, default=3.0,
                    help="trail 模式：peak − m×σ 止损")
     p.add_argument("--output", type=Path, default=None)
@@ -260,12 +197,12 @@ def main() -> None:
     )
     out, entries, exits = run_backtest(
         df, args.window, args.k, args.rising_ma, args.exit_mode,
-        args.confirm, args.rebuy, args.trail_m,
+        args.confirm, args.trail_m,
     )
     plot(out, entries, exits, args.code,
          {"window": args.window, "k": args.k, "rising_ma": args.rising_ma,
           "exit_mode": args.exit_mode, "confirm": args.confirm,
-          "rebuy": args.rebuy, "trail_m": args.trail_m},
+          "trail_m": args.trail_m},
          output, args.output_csv)
 
 
