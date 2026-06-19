@@ -12,6 +12,7 @@ from .convert import (
     convert_pbc_money_supply, convert_pbc_social_financing_flow,
     convert_pbc_social_financing_stock, convert_pbc_credit_funds,
     convert_pbc_central_bank_balance_sheet,
+    convert_gov_stat_trade, convert_gov_stat_retail_sales,
 )
 
 
@@ -37,6 +38,8 @@ def build_stages(data_path: str, output_dir: str) -> list[list[Step]]:
             Step("pbc_social_financing_stock", convert_pbc_social_financing_stock, dict(data_path=data_path, output_dir=output_dir)),
             Step("pbc_credit_funds", convert_pbc_credit_funds, dict(data_path=data_path, output_dir=output_dir)),
             Step("pbc_central_bank_balance_sheet", convert_pbc_central_bank_balance_sheet, dict(data_path=data_path, output_dir=output_dir)),
+            Step("gov_stat_trade", convert_gov_stat_trade, dict(data_path=data_path, output_dir=output_dir)),
+            Step("gov_stat_retail_sales", convert_gov_stat_retail_sales, dict(data_path=data_path, output_dir=output_dir)),
         ],
         # Stage 2: 前复权
         [

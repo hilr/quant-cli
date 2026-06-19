@@ -30,6 +30,7 @@
 | 数据集 | 类型 | 说明 | 文档 |
 |--------|------|------|------|
 | gov_stats/工业企业指标 | 原始 | 规模以上工业企业月度经济效益 | [文档](docs/datasets/gov_stats_industrial.md) |
+| gov_stats/{进出口,社会消费品零售总额} | 原始 | 海关进出口、社会消费品零售总额月度指标（千美元/亿元/%），csv≤近年 + xlsx | 见下方 |
 | gov_pbc | 原始 | 央行月度统计（货币供应量、社融、信贷收支、货币当局资产负债表），按年目录，htm/xls/xlsx 混合格式 | 见下方 |
 | csindex/industry | 原始 | 中证行业分类快照（一/二/三/四级），日度但变化慢 | 见下方 |
 | csindex/index_weight/{000300,000905} | 原始 | HS300 / CSI500 月度成分权重（OLE .xls 伪装成 .xlsx） | 见下方 |
@@ -39,6 +40,8 @@
 | pbc/social_financing_stock | 生成 | 社会融资规模存量 + 增速，长表 | [文档](docs/datasets/pbc_social_financing_stock.md) |
 | pbc/credit_funds | 生成 | 金融机构信贷收支（存贷款全明细），长表 | [文档](docs/datasets/pbc_credit_funds.md) |
 | pbc/central_bank_balance_sheet | 生成 | 货币当局资产负债表（全明细），长表 | [文档](docs/datasets/pbc_central_bank_balance_sheet.md) |
+| gov_stat/trade | 生成 | 海关进出口月度指标（长表） | [文档](docs/datasets/gov_stat_trade.md) |
+| gov_stat/retail_sales | 生成 | 社会消费品零售总额月度指标（长表） | [文档](docs/datasets/gov_stat_retail_sales.md) |
 | stock_quote_history | 生成 | 股票行情历史 | [文档](docs/datasets/stock_quote_history.md) |
 | stock_quote_adjusted | 生成 | 前复权行情 | [文档](docs/datasets/stock_quote_adjusted.md) |
 | stock_quote_ta | 生成 | 技术指标 | [文档](docs/datasets/stock_quote_ta.md) |
@@ -424,5 +427,15 @@ uv run python plots/channel_entry_signals.py --code 512890 --window 120 --k 1.5 
 │        social_financing_stock(社融存量+增速，2015+)              │
 │        credit_funds          (信贷收支，本外币+人民币，1999+)    │
 │        central_bank_balance_sheet (央行资产负债表，1999+)       │
+└─────────────────────────────────────────────────────────────────┘
+
+┌─────────────────────────────────────────────────────────────────┐
+│                      统计局月度指标数据流                        │
+├─────────────────────────────────────────────────────────────────┤
+│  gov_stats/{工业企业指标,进出口,社会消费品零售总额}/{year}.{csv,xlsx} │
+│       ↓  (月份列乱序/倒序，按列名 'YYYY年M月' 解析；指标×月份宽表转长表) │
+│  gov_stat/  industry_profit  (利润累计→当月差分，每年一文件)     │
+│             trade             (进出口，千美元/%)                 │
+│             retail_sales      (消费品零售，亿元/%)              │
 └─────────────────────────────────────────────────────────────────┘
 ```

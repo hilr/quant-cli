@@ -1679,3 +1679,102 @@ def convert_pbc_central_bank_balance_sheet(data_path: str, output_dir: str) -> i
     df.write_csv(out_path / "central_bank_balance_sheet.csv")
     print(f"Saved central_bank_balance_sheet: {len(df)} rows to {out_path}")
     return len(df)
+
+
+# ============== gov_stat（国家统计局月度指标）==============
+
+def _gov_stat_read_rows(path: Path) -> list[list[str]]:
+    """读 gov_stats 的 csv/xlsx → 二维字符串数组。"""
+    if path.suffix.lower() == ".csv":
+        with open(path, encoding="utf-8") as f:
+            return list(csv.reader(f))
+    wb = CalamineWorkbook.from_path(str(path))
+    ws = wb.get_sheet_by_index(0)
+    return [["" if c is None else str(c) for c in row] for row in ws.to_python()]
+
+
+_GOV_STAT_MONTH_RE = re.compile(r"(\d{4})年(\d{1,2})月")
+
+
+def _gov_stat_parse_indicator_table(path: Path) -> list[tuple[str, str, float]]:
+    """读 gov_stats 的「指标×月份」表（csv 或 xlsx），返回 [(date, indicator, value)]。
+    月份列名形如 'YYYY年M月'，可能乱序或倒序，按列名解析（不依赖列顺序）。
+    指标名去所有空白统一（如 '当期值 (千美元)' → '当期值(千美元)'），保留括号单位。
+    跳过注释/来源行。"""
+    rows = _gov_stat_read_rows(path)
+    header_idx = None
+    for i, r in enumerate(rows):
+        if r and r[0] and "指标" in str(r[0]):
+            header_idx = i
+            break
+    if header_idx is None:
+        return []
+    header = rows[header_idx]
+    month_cols: list[tuple[int, int, int]] = []  # (col_idx, year, month)
+    for j in range(1, len(header)):
+        m = _GOV_STAT_MONTH_RE.search(str(header[j]))
+        if m:
+            month_cols.append((j, int(m.group(1)), int(m.group(2))))
+
+    out: list[tuple[str, str, float]] = []
+    for r in rows[header_idx + 1:]:
+        if not r or not r[0]:
+            continue
+        ind = str(r[0]).strip()
+        if not ind or ind.startswith("注") or ind.startswith("数据来源"):
+            break
+        ind_norm = re.sub(r"\s+", "", ind)
+        for j, y, mo in month_cols:
+            val = _pbc_to_float(r[j]) if j < len(r) else None
+            if val is None:
+                continue
+            out.append((f"{y:04d}-{mo:02d}", ind_norm, val))
+    return out
+
+
+def _convert_gov_stat_monthly_indicators(
+    data_path: str, output_dir: str, src_name: str, out_name: str,
+    year_start: int = 2000, year_end: int = 2026,
+) -> int:
+    """通用：把 gov_stats/{src_name}/{year}.{csv,xlsx} 的「指标×月份」表汇总为
+    长表 {output_dir}/gov_stat/{out_name}.csv（date, indicator, value）。"""
+    src_root = Path(data_path) / "gov_stats" / src_name
+    out_path = Path(output_dir) / "gov_stat"
+    out_path.mkdir(parents=True, exist_ok=True)
+
+    records: list[tuple[str, str, float]] = []
+    for year in range(year_start, year_end + 1):
+        fp = src_root / f"{year}.csv"
+        if not fp.exists():
+            fp = src_root / f"{year}.xlsx"
+        if not fp.exists():
+            continue
+        try:
+            records.extend(_gov_stat_parse_indicator_table(fp))
+        except Exception as e:
+            print(f"  跳过 {src_name} {year}：{e}")
+
+    df = pl.DataFrame({
+        "date": [r[0] for r in records],
+        "indicator": [r[1] for r in records],
+        "value": [r[2] for r in records],
+    }).sort(["date", "indicator"])
+    df.write_csv(out_path / f"{out_name}.csv")
+    print(f"Saved {out_name}: {len(df)} rows to {out_path}")
+    return len(df)
+
+
+def convert_gov_stat_trade(data_path: str, output_dir: str) -> int:
+    """海关进出口月度指标（千美元 / %），长表 date/indicator/value。
+    指标含进出口/出口/进口总值（当期值、同比、累计值、累计增长）及进出口差额
+    （当期值、累计值）。源：gov_stats/进出口/{year}.{csv≤2022, xlsx≥2023}，2000 起。"""
+    return _convert_gov_stat_monthly_indicators(
+        data_path, output_dir, src_name="进出口", out_name="trade")
+
+
+def convert_gov_stat_retail_sales(data_path: str, output_dir: str) -> int:
+    """社会消费品零售总额月度指标（亿元 / %），长表 date/indicator/value。
+    指标含社会消费品零售总额、限上单位消费品零售额的当期值、累计值、同比、
+    累计同比。源：gov_stats/社会消费品零售总额/{year}.{csv≤2024, xlsx≥2025}，2000 起。"""
+    return _convert_gov_stat_monthly_indicators(
+        data_path, output_dir, src_name="社会消费品零售总额", out_name="retail_sales")

@@ -10,7 +10,8 @@ from quant.convert import (convert_stock_quote, convert_margin_trade, convert_ad
                            convert_fund_hs300_correlation, convert_industry_profit,
                            convert_pbc_money_supply, convert_pbc_social_financing_flow,
                            convert_pbc_social_financing_stock, convert_pbc_credit_funds,
-                           convert_pbc_central_bank_balance_sheet)
+                           convert_pbc_central_bank_balance_sheet,
+                           convert_gov_stat_trade, convert_gov_stat_retail_sales)
 from quant.filter import (filter_volume_spike as run_filter_volume_spike,
                           filter_ma_converge as run_filter_ma_converge,
                           filter_by_tags as run_filter_by_tags,
@@ -280,6 +281,28 @@ def pbc_central_bank_balance_sheet(
     """货币当局资产负债表（全明细），长表 date/item/value（亿元），1999 起"""
     console.print(f"[cyan]生成央行资产负债表数据...[/cyan]")
     count = convert_pbc_central_bank_balance_sheet(data_path=data_path, output_dir=output_dir)
+    console.print(f"[green]完成! 共 {count} 条记录[/green]")
+
+
+@cli.command()
+def gov_stat_trade(
+    data_path: str = "/mnt/readonly_dataset",
+    output_dir: str = "/mnt/dataset",
+) -> None:
+    """海关进出口月度指标（千美元 / %），长表 date/indicator/value，2000 起"""
+    console.print(f"[cyan]生成进出口月度指标数据...[/cyan]")
+    count = convert_gov_stat_trade(data_path=data_path, output_dir=output_dir)
+    console.print(f"[green]完成! 共 {count} 条记录[/green]")
+
+
+@cli.command()
+def gov_stat_retail_sales(
+    data_path: str = "/mnt/readonly_dataset",
+    output_dir: str = "/mnt/dataset",
+) -> None:
+    """社会消费品零售总额月度指标（亿元 / %），长表 date/indicator/value，2000 起"""
+    console.print(f"[cyan]生成社会消费品零售总额数据...[/cyan]")
+    count = convert_gov_stat_retail_sales(data_path=data_path, output_dir=output_dir)
     console.print(f"[green]完成! 共 {count} 条记录[/green]")
 
 
