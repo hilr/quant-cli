@@ -7,7 +7,10 @@ from quant.convert import (convert_stock_quote, convert_margin_trade, convert_ad
                            convert_ta, convert_boll, convert_fund_shares, convert_fund_quote, convert_fund_adjust,
                            convert_fund_flow, convert_index_quote, convert_index_ta, convert_index_boll,
                            convert_fwd_return, convert_historical_stats,
-                           convert_fund_hs300_correlation, convert_industry_profit)
+                           convert_fund_hs300_correlation, convert_industry_profit,
+                           convert_pbc_money_supply, convert_pbc_social_financing_flow,
+                           convert_pbc_social_financing_stock, convert_pbc_credit_funds,
+                           convert_pbc_central_bank_balance_sheet)
 from quant.filter import (filter_volume_spike as run_filter_volume_spike,
                           filter_ma_converge as run_filter_ma_converge,
                           filter_by_tags as run_filter_by_tags,
@@ -223,6 +226,61 @@ def industry_profit(
     console.print(f"[cyan]生成工业企业月度利润数据...[/cyan]")
     count = convert_industry_profit(data_path=data_path, output_dir=output_dir)
     console.print(f"[green]完成! 共 {count} 个年度文件[/green]")
+
+
+@cli.command()
+def pbc_money_supply(
+    data_path: str = "/mnt/readonly_dataset",
+    output_dir: str = "/mnt/dataset",
+) -> None:
+    """央行货币供应量 M0/M1/M2 月度数据（亿元），宽表 date/m0/m1/m2，2004 起"""
+    console.print(f"[cyan]生成央行货币供应量数据...[/cyan]")
+    count = convert_pbc_money_supply(data_path=data_path, output_dir=output_dir)
+    console.print(f"[green]完成! 共 {count} 条月度记录[/green]")
+
+
+@cli.command()
+def pbc_social_financing_flow(
+    data_path: str = "/mnt/readonly_dataset",
+    output_dir: str = "/mnt/dataset",
+) -> None:
+    """社会融资规模增量（流量），长表 date/item/value（亿元），2012 起"""
+    console.print(f"[cyan]生成社融增量数据...[/cyan]")
+    count = convert_pbc_social_financing_flow(data_path=data_path, output_dir=output_dir)
+    console.print(f"[green]完成! 共 {count} 条记录[/green]")
+
+
+@cli.command()
+def pbc_social_financing_stock(
+    data_path: str = "/mnt/readonly_dataset",
+    output_dir: str = "/mnt/dataset",
+) -> None:
+    """社会融资规模存量，长表 date/item/stock/growth_rate（万亿元 / %），2015 起"""
+    console.print(f"[cyan]生成社融存量数据...[/cyan]")
+    count = convert_pbc_social_financing_stock(data_path=data_path, output_dir=output_dir)
+    console.print(f"[green]完成! 共 {count} 条记录[/green]")
+
+
+@cli.command()
+def pbc_credit_funds(
+    data_path: str = "/mnt/readonly_dataset",
+    output_dir: str = "/mnt/dataset",
+) -> None:
+    """金融机构信贷收支表（存贷款全明细），长表 date/currency/item/value（亿元），1999 起"""
+    console.print(f"[cyan]生成信贷收支数据...[/cyan]")
+    count = convert_pbc_credit_funds(data_path=data_path, output_dir=output_dir)
+    console.print(f"[green]完成! 共 {count} 条记录[/green]")
+
+
+@cli.command()
+def pbc_central_bank_balance_sheet(
+    data_path: str = "/mnt/readonly_dataset",
+    output_dir: str = "/mnt/dataset",
+) -> None:
+    """货币当局资产负债表（全明细），长表 date/item/value（亿元），1999 起"""
+    console.print(f"[cyan]生成央行资产负债表数据...[/cyan]")
+    count = convert_pbc_central_bank_balance_sheet(data_path=data_path, output_dir=output_dir)
+    console.print(f"[green]完成! 共 {count} 条记录[/green]")
 
 
 @cli.command()

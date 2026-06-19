@@ -2,10 +2,12 @@
 import csv
 import re
 import zipfile
+from html.parser import HTMLParser
 from xml.etree import ElementTree as ET
 
 import polars as pl
 from pathlib import Path
+from python_calamine import CalamineWorkbook
 
 
 # 默认数据路径
@@ -1148,3 +1150,532 @@ def convert_industry_profit(data_path: str, output_dir: str) -> int:
 
     print(f"Saved {count} yearly files to {output_path}")
     return count
+
+
+# ============== pbc（央行统计数据）==============
+
+# 文件格式优先级：有电子表格就不用 htm（用户要求）
+_PBC_EXT_PRIORITY = [".xlsx", ".xls", ".htm"]
+
+
+class _PbcHtmlTableParser(HTMLParser):
+    """从 Excel 导出的 HTML 中提取所有 <table> 的单元格文本。"""
+
+    def __init__(self):
+        super().__init__()
+        self._in_table = False
+        self._in_tr = False
+        self._in_td = False
+        self.tables: list[list[list[str]]] = []
+        self._cur_table: list[list[str]] = []
+        self._cur_row: list[str] = []
+        self._cur_cell: list[str] = []
+
+    def handle_starttag(self, tag, attrs):
+        if tag == "table":
+            self._in_table = True
+            self._cur_table = []
+        elif tag == "tr" and self._in_table:
+            self._in_tr = True
+            self._cur_row = []
+        elif tag in ("td", "th") and self._in_tr:
+            self._in_td = True
+            self._cur_cell = []
+
+    def handle_endtag(self, tag):
+        if tag == "table":
+            self._in_table = False
+            if self._cur_table:
+                self.tables.append(self._cur_table)
+            self._cur_table = []
+        elif tag == "tr" and self._in_tr:
+            self._in_tr = False
+            if self._cur_row:
+                self._cur_table.append(self._cur_row)
+            self._cur_row = []
+        elif tag in ("td", "th") and self._in_td:
+            self._in_td = False
+            self._cur_row.append("".join(self._cur_cell).strip())
+            self._cur_cell = []
+
+    def handle_data(self, data):
+        if self._in_td:
+            self._cur_cell.append(data)
+
+
+def _pbc_read_htm(path: Path) -> list[list[str]]:
+    """读 Excel 导出的 HTML，返回第一个非空表格（二维字符串数组）。
+    编码 utf-8/gbk 混用，依次尝试。"""
+    raw = path.read_bytes()
+    text = None
+    for enc in ("utf-8", "gbk", "gb18030"):
+        try:
+            text = raw.decode(enc)
+            break
+        except UnicodeDecodeError:
+            continue
+    if text is None:
+        text = raw.decode("utf-8", errors="ignore")
+    parser = _PbcHtmlTableParser()
+    parser.feed(text)
+    for table in parser.tables:
+        if any(any(cell for cell in row) for row in table):
+            return table
+    return []
+
+
+def _pbc_read_sheet(path: Path) -> list[list[str]]:
+    """统一读取 .htm/.xls/.xlsx → 二维字符串数组。"""
+    if path.suffix.lower() == ".htm":
+        return _pbc_read_htm(path)
+    wb = CalamineWorkbook.from_path(str(path))
+    ws = wb.get_sheet_by_index(0)
+    return [["" if c is None else str(c) for c in row] for row in ws.to_python()]
+
+
+def _pbc_find_file(year_dir: Path, subdirs: list[str], keywords: list[str],
+                   exclude: tuple[str, ...] = ()) -> Path | None:
+    """在 year_dir/{subdir}（按顺序）或 year_dir 根下查找文件。
+    优先级 .xlsx > .xls > .htm。匹配：文件名 stem 以某个 keyword 开头，
+    且不含 exclude 中的子串。兼容早期年份文件直接在根目录的情况。"""
+    search_dirs = [year_dir / sd for sd in subdirs] + [year_dir]
+    for sd in search_dirs:
+        if not sd.is_dir():
+            continue
+        for ext in _PBC_EXT_PRIORITY:
+            for entry in sorted(sd.iterdir()):
+                if entry.suffix.lower() != ext or not entry.is_file():
+                    continue
+                base = entry.stem
+                if any(x in base for x in exclude):
+                    continue
+                if any(base.startswith(kw) for kw in keywords):
+                    return entry
+    return None
+
+
+def _pbc_to_float(v) -> float | None:
+    if v is None:
+        return None
+    s = str(v).strip()
+    if s in ("", "--", "…", "—", "-"):
+        return None
+    try:
+        return float(s)
+    except ValueError:
+        return None
+
+
+# 项目名清洗：去全角空白、折叠空白、去尾部英文翻译、去中文序号前缀
+# 尾部英文 = 「空格+字母」或「右括号+字母」开头直到行尾（央行项目名都是
+# 「中文 English」格式；M0/M1/M2 在全角括号内、括号后无内容，不会被误删）
+_PBC_EN_TAIL = re.compile(r"(?:\s+|(?<=[）)]))[A-Za-z].*$")
+_PBC_CN_PREFIX = re.compile(r"^[一二三四五六七八九十]+、")
+
+
+def _pbc_norm_item(raw) -> str:
+    if not raw:
+        return ""
+    s = str(raw).replace("　", " ").replace("\n", " ").replace("\r", " ")
+    s = re.sub(r"\s+", " ", s).strip()
+    # 反复去尾部英文（应对中英交替）
+    prev = None
+    while prev != s:
+        prev = s
+        s = _PBC_EN_TAIL.sub("", s).strip()
+    s = _PBC_CN_PREFIX.sub("", s).strip()
+    return s
+
+
+def _pbc_is_item_header_cell(s) -> bool:
+    """表头中项目列单元格（应跳过，不是月份/数据）。"""
+    if s is None:
+        return True
+    t = str(s).strip()
+    if t == "":
+        return True
+    return "项目" in t or t.lower().startswith("item")
+
+
+def _pbc_period_to_date(header_text, year: int, col_pos: int) -> str | None:
+    """把表头单元格（如 '2015.Q1' / 2024.01 / '2024.10'）转成 'YYYY-MM'。
+    季度表头（含 Q）→ 季末月；否则按 col_pos 推断月份（不依赖浮点数值，
+    因为 Excel 会把 2024.10 截断为 2024.1）。"""
+    s = str(header_text).strip()
+    if "Q" in s.upper():
+        qm = {1: "03", 2: "06", 3: "09", 4: "12"}
+        return f"{year}-{qm[col_pos]}" if col_pos in qm else None
+    if 1 <= col_pos <= 12:
+        return f"{year}-{col_pos:02d}"
+    return None
+
+
+def _pbc_parse_period_str(s) -> tuple[int, int] | None:
+    """解析月份字符串 '2024.01' / '2024.10' / '2024-Q1' → (year, month)。
+    按字符串解析（'10' 不会被截断）。"""
+    s = str(s).strip().replace("．", ".").replace("。", ".")
+    qm = re.match(r"(\d{4})[.\-\s]?Q?([1-4])$", s, re.IGNORECASE)
+    if qm:
+        return int(qm.group(1)), {1: 3, 2: 6, 3: 9, 4: 12}[int(qm.group(2))]
+    m = re.match(r"(\d{4})[.\-\s年]+(\d{1,2})", s)
+    if m:
+        mo = int(m.group(2))
+        if 1 <= mo <= 12:
+            return int(m.group(1)), mo
+    return None
+
+
+def _pbc_find_header_row(rows: list[list[str]]) -> int | None:
+    """定位表头行：前两列含「项目」或「报表项目」的行。"""
+    for i, r in enumerate(rows):
+        if not r:
+            continue
+        head = " ".join(str(c) for c in r[:2])
+        if "项目" in head:
+            return i
+    return None
+
+
+def _pbc_row_is_note(name: str) -> bool:
+    n = str(name)
+    return n.startswith("注") or "注：" in n or "注:" in n or n.lower().startswith("note")
+
+
+def _pbc_parse_wide_months(rows: list[list[str]], year: int) -> list[tuple[str, str, float]]:
+    """解析「项目在行、月份在列」的宽表。
+    返回 [(date, item_norm, value), ...]，跳过空值和注释行。
+
+    用「行内数字序列」法：每行的项目名 = 第一个非空非数字单元格，
+    数据值 = 该行其余数字单元格（按列顺序）。月份由表头数据列按位置推断
+    （不依赖浮点数值，因 Excel 会把 2024.10 截断为 2024.1）。这能兼容
+    货币供应量表 M1/M0 因层级缩进把项目名放在数据列位置的情况。"""
+    header_idx = _pbc_find_header_row(rows)
+    if header_idx is None:
+        return []
+    header = rows[header_idx]
+    # 表头月份序列（按数据列位置 → 1..12 月或季末月）
+    month_dates: list[str] = []
+    for cell in header:
+        if _pbc_is_item_header_cell(cell):
+            continue
+        date = _pbc_period_to_date(cell, year, len(month_dates) + 1)
+        if date:
+            month_dates.append(date)
+    if not month_dates:
+        return []
+
+    out: list[tuple[str, str, float]] = []
+    for r in rows[header_idx + 1:]:
+        if not r:
+            continue
+        name = ""
+        nums: list[float] = []
+        for c in r:
+            if c is None or str(c).strip() == "":
+                continue
+            v = _pbc_to_float(c)
+            if v is not None:
+                nums.append(v)
+            elif not name:
+                cand = _pbc_norm_item(c)
+                if cand:
+                    name = cand
+        if not name:
+            continue
+        if _pbc_row_is_note(name):
+            break
+        for date, v in zip(month_dates, nums):
+            out.append((date, name, v))
+    return out
+
+
+def _pbc_parse_flow_long(rows: list[list[str]]) -> list[tuple[str, str, float]]:
+    """解析社融增量长表：月份在第 1 列（行），分项在表头列。
+    返回 [(date, item, value), ...]。"""
+    header_idx = None
+    for i, r in enumerate(rows):
+        if r and r[0] and ("月份" in str(r[0]) or "month" in str(r[0]).lower()):
+            header_idx = i
+            break
+    if header_idx is None:
+        return []
+    header = rows[header_idx]
+    item_cols = [(j, _pbc_norm_item(header[j])) for j in range(1, len(header))
+                 if header[j] and str(header[j]).strip() and not _pbc_is_item_header_cell(header[j])]
+    out = []
+    for r in rows[header_idx + 1:]:
+        if not r or not r[0] or not str(r[0]).strip():
+            continue
+        parsed = _pbc_parse_period_str(r[0])
+        if parsed is None:
+            continue
+        date = f"{parsed[0]:04d}-{parsed[1]:02d}"
+        for j, item in item_cols:
+            val = _pbc_to_float(r[j]) if j < len(r) else None
+            if val is None:
+                continue
+            out.append((date, item, val))
+    return out
+
+
+def _pbc_parse_stock_table(rows: list[list[str]], year: int) -> list[tuple[str, str, float, float]]:
+    """解析社融存量表：月份在列且每月份占 2 列（存量+增速）。
+    返回 [(date, item, stock, growth_rate), ...]。"""
+    hidx = _pbc_find_header_row(rows)
+    if hidx is None or hidx == 0:
+        return []
+    month_row = rows[hidx - 1]
+    # 月份单元格在数据列；每月份后跟一个增速列
+    pairs: list[tuple[int, int, str]] = []
+    pos = 0
+    for j in range(len(month_row)):
+        c = month_row[j]
+        if _pbc_is_item_header_cell(c):
+            continue
+        pos += 1
+        date = _pbc_period_to_date(c, year, pos)
+        if date is None:
+            continue
+        pairs.append((j, j + 1, date))  # (stock_col, growth_col, date)
+    out = []
+    for r in rows[hidx + 1:]:
+        if not r:
+            continue
+        name = _pbc_norm_item(r[0])
+        if not name:
+            continue
+        if _pbc_row_is_note(name):
+            break
+        for sc, gc, date in pairs:
+            stock = _pbc_to_float(r[sc]) if sc < len(r) else None
+            growth = _pbc_to_float(r[gc]) if gc < len(r) else None
+            if stock is None and growth is None:
+                continue
+            out.append((date, name, stock, growth))
+    return out
+
+
+# M0/M1/M2 项目名历史变体（归一化到 m0/m1/m2）
+_MS_ALIASES = {
+    "m2": ["货币和准货币（M2）", "货币和准货币(M2)", "货币和准货币"],
+    "m1": ["货币（M1）", "货币(M1)", "货币"],
+    "m0": ["流通中现金（M0）", "流通中货币（M0）", "流通中现金(M0)", "流通中货币(M0)",
+           "流通中现金", "流通中货币"],
+}
+
+
+def _pbc_alias_map(aliases: dict[str, list[str]]) -> dict[str, str]:
+    m = {}
+    for canonical, alts in aliases.items():
+        for a in alts:
+            m[a] = canonical
+    return m
+
+
+# 社融分项跨年命名变体（早期口径 vs 现代口径）
+_SF_FLOW_ALIASES = {
+    "社会融资规模增量": ["社会融资规模增量", "社会融资规模"],
+    "人民币贷款": ["人民币贷款", "其中:人民币贷款", "其中：人民币贷款"],
+}
+_SF_STOCK_ALIASES = {
+    "社会融资规模存量": ["社会融资规模存量"],
+    "人民币贷款": ["人民币贷款", "其中:人民币贷款", "其中：人民币贷款"],
+}
+
+
+def convert_pbc_money_supply(data_path: str, output_dir: str) -> int:
+    """央行货币供应量 M0/M1/M2 月度数据（亿元），宽表 date/m0/m1/m2。
+    源：gov_pbc/{year}/[货币统计概览/]货币供应量[表].{htm,xls,xlsx}，2004 起。"""
+    src_root = Path(data_path) / "gov_pbc"
+    out_path = Path(output_dir) / "pbc"
+    out_path.mkdir(parents=True, exist_ok=True)
+
+    alias_map = _pbc_alias_map(_MS_ALIASES)
+    grid: dict[str, dict[str, float]] = {}
+
+    for year in range(2004, 2027):
+        yd = src_root / str(year)
+        if not yd.is_dir():
+            continue
+        fp = _pbc_find_file(yd, ["货币统计概览"], ["货币供应量"])
+        if fp is None:
+            print(f"  跳过 {year}：找不到货币供应量表")
+            continue
+        try:
+            rows = _pbc_read_sheet(fp)
+            records = _pbc_parse_wide_months(rows, year)
+        except Exception as e:
+            print(f"  跳过 {year}：解析失败 {e}")
+            continue
+        for date, item, val in records:
+            key = alias_map.get(item)
+            if key is None:
+                continue
+            grid.setdefault(date, {})[key] = val
+
+    dates = sorted(grid)
+    df = pl.DataFrame({
+        "date": dates,
+        "m0": [grid[d].get("m0") for d in dates],
+        "m1": [grid[d].get("m1") for d in dates],
+        "m2": [grid[d].get("m2") for d in dates],
+    })
+    df.write_csv(out_path / "money_supply.csv")
+    print(f"Saved money_supply: {len(df)} rows to {out_path}")
+    return len(df)
+
+
+def convert_pbc_social_financing_flow(data_path: str, output_dir: str) -> int:
+    """社会融资规模增量（流量），长表 date/item/value（亿元）。
+    源：gov_pbc/{year}/社会融资规模/[社会融资规模增量统计表|社会融资规模统计表]
+    .{htm,xls,xlsx}，2012 起。2012-2014 为宽表（htm），2015+ 为长表。"""
+    src_root = Path(data_path) / "gov_pbc"
+    out_path = Path(output_dir) / "pbc"
+    out_path.mkdir(parents=True, exist_ok=True)
+    alias_map = _pbc_alias_map(_SF_FLOW_ALIASES)
+
+    records: list[tuple[str, str, float]] = []
+    for year in range(2012, 2027):
+        yd = src_root / str(year) / "社会融资规模"
+        if not yd.is_dir():
+            continue
+        fp = _pbc_find_file(yd, [], ["社会融资规模增量统计表"], exclude=("地区",))
+        if fp is None:
+            fp = _pbc_find_file(yd, [], ["社会融资规模统计表"],
+                                exclude=("地区", "增量", "存量"))
+        if fp is None:
+            print(f"  跳过 {year}：找不到社融增量表")
+            continue
+        try:
+            rows = _pbc_read_sheet(fp)
+            # 优先长表（2015+），否则宽表（2012-2014 htm）
+            recs = _pbc_parse_flow_long(rows)
+            if not recs:
+                recs = _pbc_parse_wide_months(rows, year)
+        except Exception as e:
+            print(f"  跳过 {year}：解析失败 {e}")
+            continue
+        records.extend(recs)
+
+    df = pl.DataFrame({
+        "date": [r[0] for r in records],
+        "item": [alias_map.get(r[1], r[1]) for r in records],
+        "value": [r[2] for r in records],
+    }).sort(["date", "item"])
+    df.write_csv(out_path / "social_financing_flow.csv")
+    print(f"Saved social_financing_flow: {len(df)} rows to {out_path}")
+    return len(df)
+
+
+def convert_pbc_social_financing_stock(data_path: str, output_dir: str) -> int:
+    """社会融资规模存量，长表 date/item/stock/growth_rate（万亿元 / %）。
+    源：gov_pbc/{year}/社会融资规模/社会融资规模存量统计表.{htm,xls,xlsx}，2015 起。
+    2015 为季度数据（Q1-Q4，映射到季末月），2016+ 为月度。"""
+    src_root = Path(data_path) / "gov_pbc"
+    out_path = Path(output_dir) / "pbc"
+    out_path.mkdir(parents=True, exist_ok=True)
+    alias_map = _pbc_alias_map(_SF_STOCK_ALIASES)
+
+    records: list[tuple[str, str, float, float]] = []
+    for year in range(2015, 2027):
+        yd = src_root / str(year) / "社会融资规模"
+        if not yd.is_dir():
+            continue
+        fp = _pbc_find_file(yd, [], ["社会融资规模存量统计表"], exclude=("地区",))
+        if fp is None:
+            print(f"  跳过 {year}：找不到社融存量表")
+            continue
+        try:
+            rows = _pbc_read_sheet(fp)
+            recs = _pbc_parse_stock_table(rows, year)
+        except Exception as e:
+            print(f"  跳过 {year}：解析失败 {e}")
+            continue
+        records.extend(recs)
+
+    df = pl.DataFrame({
+        "date": [r[0] for r in records],
+        "item": [alias_map.get(r[1], r[1]) for r in records],
+        "stock": [r[2] for r in records],
+        "growth_rate": [r[3] for r in records],
+    }).sort(["date", "item"])
+    df.write_csv(out_path / "social_financing_stock.csv")
+    print(f"Saved social_financing_stock: {len(df)} rows to {out_path}")
+    return len(df)
+
+
+def convert_pbc_credit_funds(data_path: str, output_dir: str) -> int:
+    """金融机构信贷收支表（存贷款），长表 date/currency/item/value（亿元）。
+    currency ∈ {本外币, 人民币}。全明细输出（含各项存款、各项贷款、资金来源/运用
+    总计及所有分项）。源：gov_pbc/{year}/[金融机构信贷收支统计/]金融机构{本外币,人民币}
+    信贷收支表.{htm,xls,xlsx}，1999 起（本外币口径部分年份缺失）。"""
+    src_root = Path(data_path) / "gov_pbc"
+    out_path = Path(output_dir) / "pbc"
+    out_path.mkdir(parents=True, exist_ok=True)
+
+    specs = [
+        ("本外币", ["金融机构本外币信贷收支表"], ("按部门",)),
+        ("人民币", ["金融机构人民币信贷收支表"], ("按部门",)),
+    ]
+    records: list[tuple[str, str, str, float]] = []
+    for currency, keywords, exclude in specs:
+        for year in range(1999, 2027):
+            yd = src_root / str(year)
+            if not yd.is_dir():
+                continue
+            fp = _pbc_find_file(yd, ["金融机构信贷收支统计"], keywords, exclude)
+            if fp is None:
+                continue
+            try:
+                rows = _pbc_read_sheet(fp)
+                recs = _pbc_parse_wide_months(rows, year)
+            except Exception as e:
+                print(f"  跳过 {currency} {year}：{e}")
+                continue
+            for date, item, val in recs:
+                records.append((date, currency, item, val))
+
+    df = pl.DataFrame({
+        "date": [r[0] for r in records],
+        "currency": [r[1] for r in records],
+        "item": [r[2] for r in records],
+        "value": [r[3] for r in records],
+    }).sort(["date", "currency", "item"])
+    df.write_csv(out_path / "credit_funds.csv")
+    print(f"Saved credit_funds: {len(df)} rows to {out_path}")
+    return len(df)
+
+
+def convert_pbc_central_bank_balance_sheet(data_path: str, output_dir: str) -> int:
+    """货币当局资产负债表，长表 date/item/value（亿元）。全明细输出（资产方+
+    负债方各项，含总资产/总负债）。源：gov_pbc/{year}/[货币统计概览/]货币当局资产
+    负债表.{htm,xls,xlsx}，1999 起。"""
+    src_root = Path(data_path) / "gov_pbc"
+    out_path = Path(output_dir) / "pbc"
+    out_path.mkdir(parents=True, exist_ok=True)
+
+    records: list[tuple[str, str, float]] = []
+    for year in range(1999, 2027):
+        yd = src_root / str(year)
+        if not yd.is_dir():
+            continue
+        fp = _pbc_find_file(yd, ["货币统计概览"], ["货币当局资产负债表"])
+        if fp is None:
+            print(f"  跳过 {year}：找不到货币当局资产负债表")
+            continue
+        try:
+            rows = _pbc_read_sheet(fp)
+            recs = _pbc_parse_wide_months(rows, year)
+        except Exception as e:
+            print(f"  跳过 {year}：{e}")
+            continue
+        records.extend(recs)
+
+    df = pl.DataFrame({
+        "date": [r[0] for r in records],
+        "item": [r[1] for r in records],
+        "value": [r[2] for r in records],
+    }).sort(["date", "item"])
+    df.write_csv(out_path / "central_bank_balance_sheet.csv")
+    print(f"Saved central_bank_balance_sheet: {len(df)} rows to {out_path}")
+    return len(df)
