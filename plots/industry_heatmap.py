@@ -24,7 +24,8 @@ from matplotlib.colors import LinearSegmentedColormap, Normalize
 from matplotlib.patches import Rectangle
 
 INDUSTRY_DIR_NAME = "csindex/industry"
-QUOTE_DIR_NAME = "eastmoney/stock_quote"
+# 行情目录候选：finance_sina 是实时源，eastmoney 是历史归档（2025-11 后停更）。靠前的优先。
+QUOTE_DIR_CANDIDATES = ["finance_sina/stock_quote", "eastmoney/stock_quote"]
 
 MIN_FULL_ROWS = 4000
 COLOR_LIMIT = 0.05
@@ -81,11 +82,18 @@ def load_industry(data_path: Path, level: int) -> pl.DataFrame:
     return pl.DataFrame(records)
 
 
+def _find_quote_file(data_path: Path, target_date: str) -> Path:
+    """在候选目录里找指定日期的行情文件，靠前的目录优先。"""
+    for name in QUOTE_DIR_CANDIDATES:
+        f = data_path / name / f"{target_date}.csv"
+        if f.exists():
+            return f
+    raise FileNotFoundError(f"找不到 {target_date} 行情文件，已搜: {QUOTE_DIR_CANDIDATES}")
+
+
 def load_quote(data_path: Path, target_date: str) -> pl.DataFrame:
     """指定日期行情 → [code(6位字符串), turnover, pct_chg]。"""
-    f = data_path / QUOTE_DIR_NAME / f"{target_date}.csv"
-    if not f.exists():
-        raise FileNotFoundError(f"找不到行情文件: {f}")
+    f = _find_quote_file(data_path, target_date)
     df = pl.read_csv(f, infer_schema_length=10000)
     return (
         df.with_columns([
@@ -99,13 +107,19 @@ def load_quote(data_path: Path, target_date: str) -> pl.DataFrame:
 
 
 def pick_latest_full_date(data_path: Path) -> str:
-    """扫描 stock_quote 目录，取最新一份行数 >= MIN_FULL_ROWS 的日期。"""
-    quote_dir = data_path / QUOTE_DIR_NAME
-    for f in sorted(quote_dir.glob("*.csv"), reverse=True):
-        with open(f, "rb") as fp:
+    """扫描所有行情候选目录，取最新一份行数 >= MIN_FULL_ROWS 的日期。"""
+    by_date: dict[str, Path] = {}
+    for name in QUOTE_DIR_CANDIDATES:
+        d = data_path / name
+        if not d.exists():
+            continue
+        for f in d.glob("*.csv"):
+            by_date.setdefault(f.stem, f)  # 候选列表靠前的目录优先
+    for date in sorted(by_date, reverse=True):
+        with open(by_date[date], "rb") as fp:
             n = sum(1 for _ in fp)
         if n >= MIN_FULL_ROWS:
-            return f.stem
+            return date
     raise RuntimeError(f"找不到行数 >= {MIN_FULL_ROWS} 的完整行情文件")
 
 

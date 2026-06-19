@@ -51,34 +51,51 @@
 
 ### industry_heatmap — 行业成交额-涨幅方块热力图
 
-finviz 风格的市场全景热力图：方块按中证行业聚集，方块大小 ∝ 当日成交额，颜色 ∝ 当日涨幅（A股惯例红涨绿跌）。范围限定 HS300 + CSI500 成分股（约 800 只）。
+finviz 风格的市场全景热力图（全 A 股聚合）：一个中证行业一个方块，方块面积 ∝ 该行业当日总成交额，颜色 = 行业成交额加权涨跌幅（A股惯例红涨绿跌，±5% 截断）。按加权涨幅倒序自然换行排列 → 左上=最大涨幅，右下=最大跌幅。
 
 ```bash
-# 最新交易日（自动跳过残缺尾段），中证二级行业
+# 最新交易日（自动跳过残缺尾段），中证三级行业（约 94 类）
 uv run python plots/industry_heatmap.py
 
-# 中证一级行业（更聚合）
+# 中证一级行业（约 11 类，更聚合）
 uv run python plots/industry_heatmap.py --level 1
 
 # 指定日期
-uv run python plots/industry_heatmap.py --date 2025-10-30
+uv run python plots/industry_heatmap.py --date 2026-06-18
 ```
 
 | 参数 | 说明 | 默认 |
 |------|------|------|
 | `--date` | 目标日期 YYYY-MM-DD | 最新行数 ≥ 4000 的交易日 |
-| `--level` | 行业层级 1/2/3 | 2（中证二级，约 35 类） |
+| `--level` | 行业层级 1/2/3/4 | 3（中证三级，约 94 类） |
 | `--data-path` | 只读原始数据根目录 | /mnt/readonly_dataset |
 | `--output` | 输出 PNG 路径 | /mnt/dataset/industry_heatmap_{date}_l{level}.png |
 
 **数据源：**
 - 行业分类：`{data_path}/csindex/industry/{date}.xlsx`（取最新一份）
-- HS300/CSI500 成分：`{data_path}/csindex/index_weight/{000300,000905}/{date}.xlsx`（实为 OLE .xls 伪装，脚本内部自动处理）
-- 当日行情：`{data_path}/eastmoney/stock_quote/{date}.csv`
+- 当日行情：`{data_path}/finance_sina/stock_quote/{date}.csv`（实时源；缺失时回退 `eastmoney/stock_quote`，已停更于 2025-11）
+
+### industry_turnover_stack — 行业成交额占比堆叠柱状图（时序）
+
+每根柱子 = 一个交易日，柱高 100% = 当日全市场成交额，按中证二级行业堆叠：段高 = 该行业成交额占比（%），段色 = 该行业成交额加权涨跌幅（红涨绿跌）。行业按 (一级代码, 二级代码) 固定排序，一级分组在堆叠里连续。
+
+```bash
+# 最近 30 个日历日内的交易日（默认）
+uv run python plots/industry_turnover_stack.py
+
+# 最近 60 日
+uv run python plots/industry_turnover_stack.py --days 60
+```
+
+| 参数 | 说明 | 默认 |
+|------|------|------|
+| `--days` | 最近 N 个日历日内的完整交易日 | 30 |
+| `--data-path` | 只读原始数据根目录 | /mnt/readonly_dataset |
+| `--output` | 输出 PNG 路径 | /mnt/dataset/industry_turnover_stack_{end}.png |
+
+**数据源：** 同 `industry_heatmap`（行业分类 + `finance_sina/stock_quote`，缺失回退 eastmoney）。
 
 **行业表字段：** 证券代码, 证券简称, 中证一/二/三/四级行业分类代码与简称（8394 只股票，11 个一级、35 个二级、~90 个三级、~200 个四级）
-
-**权重表字段：** 日期Date, 指数代码, 指数名称, 成份券代码, 成份券名称, 交易所, 权重(%)
 
 ---
 
