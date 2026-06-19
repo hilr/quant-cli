@@ -20,7 +20,6 @@ from pathlib import Path
 
 import matplotlib.pyplot as plt
 import polars as pl
-import squarify
 from matplotlib.colors import LinearSegmentedColormap, Normalize
 from matplotlib.patches import Rectangle
 
@@ -110,15 +109,14 @@ def pick_latest_full_date(data_path: Path) -> str:
     raise RuntimeError(f"找不到行数 >= {MIN_FULL_ROWS} 的完整行情文件")
 
 
-def _draw_block(ax, x: float, y_sq: float, w: float, h: float, ind: dict, color_norm) -> None:
+def _draw_block(ax, x: float, y: float, w: float, h: float, ind: dict, color_norm) -> None:
     """画一个行业方块 + 文字。文字密度按方块大小自适应。
 
-    y_sq 是 squarify 输出的 y（y-down：0 在画布顶部），内部转成 matplotlib 的 y-up（0 在底部）。
+    x, y 是方块左下角的 matplotlib 坐标（y-up：0 在底部）。
     """
     chg = ind["weighted_chg"]
     clamped = max(-COLOR_LIMIT, min(COLOR_LIMIT, chg))
     color = RED_GREEN_CMAP(color_norm(clamped))
-    y = 100.0 - y_sq - h  # 坐标系转换
     ax.add_patch(Rectangle(
         (x, y), w, h,
         facecolor=color, edgecolor="white", linewidth=1.0, zorder=2,
@@ -182,22 +180,33 @@ def render(industries: pl.DataFrame, target_date: str, level: int, output: Path)
     fig.text(
         0.525, 0.965,
         f"行业全景热力图 · {target_date} · 中证{level_name}行业 · 全 A 股\n"
-        f"排序：(加权涨幅 desc, 成交额 desc) → 左上=大涨 + 大成交额  方块面积 ∝ 成交额  "
+        f"按成交额加权涨幅倒序自然换行 → 左上=最大涨幅，右下=最大跌幅  方块面积 ∝ 成交额  "
         f"共 {industries.height} 个行业（涨 {up} / 跌 {down}），总成交额 {total_turnover_yi:.0f} 亿",
         ha="center", va="top", fontsize=13,
     )
 
-    # 全局 squarify，按 (加权涨幅 desc, 成交额 desc) 排序。
-    # 不严格按 tier 分行，允许相邻 tier 自然混排补位（更紧凑）。
-    # 排序保证最大涨幅 + 大成交额的行业落在左上角；末尾跌幅大且成交额大的在右下角。
+    # 按加权涨幅倒序，自然换行（行优先填充）。行高 ∝ 行内总成交额 → 跨行面积仍严格等比。
+    # 空间顺序严格等于排序顺序：第一行 = 涨幅最大的一批，最后一行 = 跌幅最大的一批。
     color_norm = Normalize(vmin=-COLOR_LIMIT, vmax=COLOR_LIMIT)
-    sorted_df = industries.sort(["weighted_chg", "total_turnover"], descending=[True, True])
-    sizes = sorted_df["total_turnover"].to_list()
-    norm_sizes = squarify.normalize_sizes(sizes, 100, 100)
-    rects = squarify.squarify(norm_sizes, 0, 0, 100, 100)
+    sorted_df = industries.sort("weighted_chg", descending=True)
+    n = sorted_df.height
+    n_cols = max(5, int(round(math.sqrt(n * 1.7))))
+    n_rows = math.ceil(n / n_cols)
+    rows = [sorted_df.slice(i * n_cols, n_cols) for i in range(n_rows)]
 
-    for rect, ind in zip(rects, sorted_df.iter_rows(named=True)):
-        _draw_block(ax, rect["x"], rect["y"], rect["dx"], rect["dy"], ind, color_norm)
+    total_all = sorted_df["total_turnover"].sum()
+    row_heights = [r["total_turnover"].sum() / total_all * 100.0 for r in rows]
+
+    y_cursor = 100.0
+    for row_df, h in zip(rows, row_heights):
+        row_total = row_df["total_turnover"].sum()
+        y_bot = y_cursor - h
+        x = 0.0
+        for ind in row_df.iter_rows(named=True):
+            w = ind["total_turnover"] / row_total * 100.0
+            _draw_block(ax, x, y_bot, w, h, ind, color_norm)
+            x += w
+        y_cursor = y_bot
 
     # 左侧垂直 colorbar
     cax = fig.add_axes([0.012, 0.15, 0.028, 0.7])
@@ -212,7 +221,7 @@ def render(industries: pl.DataFrame, target_date: str, level: int, output: Path)
     output.parent.mkdir(parents=True, exist_ok=True)
     fig.savefig(output, dpi=120, bbox_inches="tight", facecolor="white")
     plt.close(fig)
-    print(f"Saved: {output}  (global squarify, {industries.height} 个行业)")
+    print(f"Saved: {output}  (自然换行 {n_cols} 列 × {n_rows} 行, {industries.height} 个行业)")
 
 
 def main() -> None:
