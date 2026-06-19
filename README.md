@@ -30,9 +30,15 @@
 | 数据集 | 类型 | 说明 | 文档 |
 |--------|------|------|------|
 | gov_stats/工业企业指标 | 原始 | 规模以上工业企业月度经济效益 | [文档](docs/datasets/gov_stats_industrial.md) |
+| gov_pbc | 原始 | 央行月度统计（货币供应量、社融、信贷收支、货币当局资产负债表），按年目录，htm/xls/xlsx 混合格式 | 见下方 |
 | csindex/industry | 原始 | 中证行业分类快照（一/二/三/四级），日度但变化慢 | 见下方 |
 | csindex/index_weight/{000300,000905} | 原始 | HS300 / CSI500 月度成分权重（OLE .xls 伪装成 .xlsx） | 见下方 |
 | industry_profit | 生成 | 工业企业每月利润总额 | [文档](docs/datasets/industry_profit.md) |
+| pbc/money_supply | 生成 | 央行货币供应量 M0/M1/M2 月度（亿元），宽表 | [文档](docs/datasets/pbc_money_supply.md) |
+| pbc/social_financing_flow | 生成 | 社会融资规模增量（流量），长表 | [文档](docs/datasets/pbc_social_financing_flow.md) |
+| pbc/social_financing_stock | 生成 | 社会融资规模存量 + 增速，长表 | [文档](docs/datasets/pbc_social_financing_stock.md) |
+| pbc/credit_funds | 生成 | 金融机构信贷收支（存贷款全明细），长表 | [文档](docs/datasets/pbc_credit_funds.md) |
+| pbc/central_bank_balance_sheet | 生成 | 货币当局资产负债表（全明细），长表 | [文档](docs/datasets/pbc_central_bank_balance_sheet.md) |
 | stock_quote_history | 生成 | 股票行情历史 | [文档](docs/datasets/stock_quote_history.md) |
 | stock_quote_adjusted | 生成 | 前复权行情 | [文档](docs/datasets/stock_quote_adjusted.md) |
 | stock_quote_ta | 生成 | 技术指标 | [文档](docs/datasets/stock_quote_ta.md) |
@@ -405,5 +411,18 @@ uv run python plots/channel_entry_signals.py --code 512890 --window 120 --k 1.5 
 │  fund_quote_adjusted (前复权)                                   │
 │       ├─→ fund_flow ← fund_shares_history                       │
 │       └─→ fund_hs300_correlation (沪深300关联基金滚动相关性)    │
+└─────────────────────────────────────────────────────────────────┘
+
+┌─────────────────────────────────────────────────────────────────┐
+│                        央行宏观数据流                            │
+├─────────────────────────────────────────────────────────────────┤
+│  gov_pbc/{year}/[子目录]/{表}.{htm,xls,xlsx}                    │
+│       ↓  (xlsx > xls > htm 优先；htm 用 html.parser，xls/xlsx   │
+│          用 calamine；月份列按位置推断避免 Excel 浮点截断)        │
+│  pbc/  money_supply          (M0/M1/M2，2004+)                  │
+│        social_financing_flow (社融增量，2012+)                   │
+│        social_financing_stock(社融存量+增速，2015+)              │
+│        credit_funds          (信贷收支，本外币+人民币，1999+)    │
+│        central_bank_balance_sheet (央行资产负债表，1999+)       │
 └─────────────────────────────────────────────────────────────────┘
 ```
