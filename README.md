@@ -30,6 +30,8 @@
 | 数据集 | 类型 | 说明 | 文档 |
 |--------|------|------|------|
 | gov_stats/工业企业指标 | 原始 | 规模以上工业企业月度经济效益 | [文档](docs/datasets/gov_stats_industrial.md) |
+| csindex/industry | 原始 | 中证行业分类快照（一/二/三/四级），日度但变化慢 | 见下方 |
+| csindex/index_weight/{000300,000905} | 原始 | HS300 / CSI500 月度成分权重（OLE .xls 伪装成 .xlsx） | 见下方 |
 | industry_profit | 生成 | 工业企业每月利润总额 | [文档](docs/datasets/industry_profit.md) |
 | stock_quote_history | 生成 | 股票行情历史 | [文档](docs/datasets/stock_quote_history.md) |
 | stock_quote_adjusted | 生成 | 前复权行情 | [文档](docs/datasets/stock_quote_adjusted.md) |
@@ -40,6 +42,60 @@
 | fund_quote_history | 生成 | 基金行情历史 | [文档](docs/datasets/fund_quote_history.md) |
 | fund_flow | 生成 | 基金资金流 | [文档](docs/datasets/fund_flow.md) |
 | fund_hs300_correlation | 生成 | 沪深300关联基金滚动相关性 | [文档](docs/datasets/fund_hs300_correlation.md) |
+
+---
+
+## 可视化脚本
+
+独立 argparse 脚本，放在 `plots/`，输出 PNG 到 `/mnt/dataset/`。
+
+### industry_heatmap — 行业成交额-涨幅方块热力图
+
+finviz 风格的市场全景热力图（全 A 股聚合）：一个中证行业一个方块，方块面积 ∝ 该行业当日总成交额，颜色 = 行业成交额加权涨跌幅（A股惯例红涨绿跌，±5% 截断）。按加权涨幅倒序自然换行排列 → 左上=最大涨幅，右下=最大跌幅。
+
+```bash
+# 最新交易日（自动跳过残缺尾段），中证三级行业（约 94 类）
+uv run python plots/industry_heatmap.py
+
+# 中证一级行业（约 11 类，更聚合）
+uv run python plots/industry_heatmap.py --level 1
+
+# 指定日期
+uv run python plots/industry_heatmap.py --date 2026-06-18
+```
+
+| 参数 | 说明 | 默认 |
+|------|------|------|
+| `--date` | 目标日期 YYYY-MM-DD | 最新行数 ≥ 4000 的交易日 |
+| `--level` | 行业层级 1/2/3/4 | 3（中证三级，约 94 类） |
+| `--data-path` | 只读原始数据根目录 | /mnt/readonly_dataset |
+| `--output` | 输出 PNG 路径 | /mnt/dataset/industry_heatmap_{date}_l{level}.png |
+
+**数据源：**
+- 行业分类：`{data_path}/csindex/industry/{date}.xlsx`（取最新一份）
+- 当日行情：`{data_path}/finance_sina/stock_quote/{date}.csv`（实时源；缺失时回退 `eastmoney/stock_quote`，已停更于 2025-11）
+
+### industry_turnover_stack — 行业成交额占比 river 图（streamgraph，时序）
+
+每条带 = 一个中证二级行业的成交额占比，沿时间连续流动（weighted-wiggle 基线）。每个行业一种固定颜色（按一级行业色相分组、组内二级用亮度区分），同色 = 同行业，便于追踪单一行业的连贯演变。行业按 (一级代码, 二级代码) 固定排序。
+
+```bash
+# 最近 30 个日历日内的交易日（默认）
+uv run python plots/industry_turnover_stack.py
+
+# 最近 60 日
+uv run python plots/industry_turnover_stack.py --days 60
+```
+
+| 参数 | 说明 | 默认 |
+|------|------|------|
+| `--days` | 最近 N 个日历日内的完整交易日 | 30 |
+| `--data-path` | 只读原始数据根目录 | /mnt/readonly_dataset |
+| `--output` | 输出 PNG 路径 | /mnt/dataset/industry_turnover_stack_{end}.png |
+
+**数据源：** 同 `industry_heatmap`（行业分类 + `finance_sina/stock_quote`，缺失回退 eastmoney）。
+
+**行业表字段：** 证券代码, 证券简称, 中证一/二/三/四级行业分类代码与简称（8394 只股票，11 个一级、35 个二级、~90 个三级、~200 个四级）
 
 ---
 
