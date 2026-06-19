@@ -1,16 +1,15 @@
-"""行业成交额占比堆叠柱状图（时序）。
+"""行业成交额占比 river 图（streamgraph，时序）。
 
-每根柱子 = 一个交易日，柱高 100% = 当日全市场成交额，按中证二级行业堆叠：
-  - 段高 = 该行业成交额占全市场比例（%）
-  - 段色 = 该行业成交额加权涨跌幅（红涨绿跌，±5% 截断）
-行业顺序固定：按 (一级代码, 二级代码) 排序，一级分组在堆叠里连续。
+每条带 = 一个中证二级行业的成交额占比，沿时间连续流动（weighted-wiggle 基线，
+band 居中、扭曲最小）。每个行业一种固定颜色（按一级行业色相分组、组内二级用亮度
+区分），同色 = 同行业，便于追踪单一行业的连贯演变。
 
 数据源：finance_sina/stock_quote（实时源）+ eastmoney/stock_quote（历史归档）fallback。
 """
 from __future__ import annotations
 
 import argparse
-import math
+import colorsys
 from datetime import date, timedelta
 from pathlib import Path
 
@@ -18,15 +17,13 @@ import matplotlib.dates as mdates
 import matplotlib.pyplot as plt
 import numpy as np
 import polars as pl
-from matplotlib.colors import Normalize
+from matplotlib.patches import Rectangle
 
 from industry_heatmap import (
     CJK_FONTS,
-    COLOR_LIMIT,
     INDUSTRY_DIR_NAME,
     MIN_FULL_ROWS,
     QUOTE_DIR_CANDIDATES,
-    RED_GREEN_CMAP,
     _read_sheet,
     load_quote,
 )
@@ -108,16 +105,34 @@ def aggregate(industry: pl.DataFrame, data_path: Path, dates: list[str]) -> pl.D
         records.append(
             df.group_by("l2_name").agg([
                 pl.col("turnover").sum().alias("turnover"),
-                (pl.col("pct_chg") * pl.col("turnover")).sum().alias("_w"),
             ])
             .with_columns([
                 pl.lit(dt).alias("date"),
                 (pl.col("turnover") / day_total * 100.0).alias("pct"),
-                (pl.col("_w") / pl.col("turnover")).alias("wchg"),
             ])
-            .select(["date", "l2_name", "pct", "wchg"])
+            .select(["date", "l2_name", "pct"])
         )
     return pl.concat(records)
+
+
+def _l2_palette(l2_order: list[tuple]) -> list[tuple]:
+    """按一级行业分组配色：每组一个色相，组内二级用亮度区分。返回每个 l2 的 RGB。"""
+    groups: list[tuple[str, list[str]]] = []
+    cur = None
+    for l1c, l1n, l2c, l2n in l2_order:
+        if l1n != cur:
+            groups.append((l1n, []))
+            cur = l1n
+        groups[-1][1].append(l2n)
+    n_groups = len(groups)
+    palette: dict[str, tuple] = {}
+    for g, (l1n, members) in enumerate(groups):
+        m_total = len(members)
+        for m, l2n in enumerate(members):
+            h = (g / n_groups) % 1.0
+            light = 0.50 + (0.20 * (m / (m_total - 1)) if m_total > 1 else 0.0)
+            palette[l2n] = colorsys.hls_to_rgb(h, light, 0.60)
+    return [palette[p[3]] for p in l2_order]
 
 
 def render(
@@ -128,9 +143,9 @@ def render(
 
     l2_names = [p[3] for p in l2_order]
     date_objs = [date.fromisoformat(d) for d in dates]
+    x = mdates.date2num(date_objs)
 
     pct_wide = long.pivot("l2_name", index="date", values="pct").sort("date")
-    wchg_wide = long.pivot("l2_name", index="date", values="wchg").sort("date")
 
     def _select(df, fill):
         cols = []
@@ -142,71 +157,54 @@ def render(
         return df.select(cols)
 
     pct_arr = _select(pct_wide, 0.0).fill_null(0.0).to_numpy()
-    wchg_arr = _select(wchg_wide, float("nan")).fill_null(float("nan")).to_numpy()
     if pct_arr.ndim == 1:
         pct_arr = pct_arr.reshape(1, -1)
-        wchg_arr = wchg_arr.reshape(1, -1)
+    Y = pct_arr.T  # (n_l2, n_dates)：stackplot 每行一个行业
 
-    norm = Normalize(vmin=-COLOR_LIMIT, vmax=COLOR_LIMIT)
-    n = len(date_objs)
-    bottom = np.zeros(n)
+    colors = _l2_palette(l2_order)
 
     fig = plt.figure(figsize=(20, 10), dpi=120)
     fig.patch.set_facecolor("white")
-    ax = fig.add_axes([0.06, 0.12, 0.58, 0.72])
-    ax.set_facecolor("#fafafa")
+    ax = fig.add_axes([0.05, 0.10, 0.60, 0.74])
+    ax.set_facecolor("white")
+    ax.stackplot(x, *Y, baseline="weighted_wiggle", colors=colors,
+                 edgecolor="white", linewidth=0.3)
 
-    for j in range(len(l2_names)):
-        heights = pct_arr[:, j]
-        chgs = wchg_arr[:, j]
-        colors = []
-        for c in chgs:
-            if c != c:  # NaN
-                colors.append("#e0e0e0")
-            else:
-                clamped = max(-COLOR_LIMIT, min(COLOR_LIMIT, float(c)))
-                colors.append(RED_GREEN_CMAP(norm(clamped)))
-        ax.bar(date_objs, heights, bottom=bottom, color=colors,
-               width=0.8, edgecolor="white", linewidth=0.3)
-        bottom += heights
-
-    ax.set_ylim(0, 100)
-    ax.set_ylabel("成交额占比 (%)", fontsize=11)
+    ax.set_xlim(x[0], x[-1])
     ax.xaxis.set_major_locator(mdates.DayLocator(interval=2))
     ax.xaxis.set_major_formatter(mdates.DateFormatter("%m-%d"))
     plt.setp(ax.get_xticklabels(), rotation=45, ha="right", fontsize=9)
-    ax.grid(True, axis="y", alpha=0.25, linestyle="--")
-    ax.set_axisbelow(True)
+    ax.set_yticks([])  # weighted_wiggle 基线下 y 绝对值无意义
+    for sp in ("left", "top", "right"):
+        ax.spines[sp].set_visible(False)
 
+    n = len(date_objs)
     start, end = dates[0], dates[-1]
     fig.text(
         0.35, 0.965,
-        f"行业成交额占比堆叠图 · {start} ~ {end}（{n} 个交易日）\n"
-        f"柱高 = 行业成交额占全市场比例（%）；颜色 = 成交额加权涨跌幅（红涨绿跌）；按一级行业分组、二级在组内排序",
+        f"行业成交额占比 river 图 · {start} ~ {end}（{n} 个交易日）\n"
+        f"每条带 = 一个中证二级行业的成交额占比（streamgraph 基线）；同色 = 同行业，按一级行业色相分组",
         ha="center", va="top", fontsize=12.5,
     )
 
-    # 左侧 colorbar
-    cax = fig.add_axes([0.015, 0.16, 0.016, 0.64])
-    sm = plt.cm.ScalarMappable(cmap=RED_GREEN_CMAP, norm=norm)
-    sm.set_array([])
-    cbar = fig.colorbar(sm, cax=cax, orientation="vertical")
-    cbar.set_label("成交额加权涨跌幅", fontsize=10)
-    ticks = [-0.05, -0.03, -0.01, 0, 0.01, 0.03, 0.05]
-    cbar.set_ticks(ticks)
-    cbar.set_ticklabels([f"{t*100:+.0f}%" for t in ticks])
-
-    # 右侧行业顺序图例：自上而下 = 堆叠自上而下
-    fig.text(0.685, 0.90, "行业顺序（自上而下）", fontsize=9.5, fontweight="bold", va="top")
-    y = 0.875
+    # 右侧图例：每个 l2 带色块，按一级分组，自上而下 = 河流自上而下
+    ax_lg = fig.add_axes([0.685, 0.06, 0.30, 0.82])
+    ax_lg.axis("off")
+    ax_lg.set_xlim(0, 1)
+    ax_lg.set_ylim(0, 1)
+    ax_lg.text(0.0, 0.99, "行业（自上而下）", fontsize=9.5, fontweight="bold", va="top")
+    y = 0.965
     prev_l1 = None
     for l1c, l1n, l2c, l2n in reversed(l2_order):
         if l1n != prev_l1:
-            fig.text(0.685, y, f"{l1n}", fontsize=9, fontweight="bold", va="top", color="#222")
-            y -= 0.0215
+            ax_lg.text(0.0, y, l1n, fontsize=9, fontweight="bold", va="top", color="#222")
+            y -= 0.023
             prev_l1 = l1n
-        fig.text(0.695, y, l2n, fontsize=7.5, va="top", color="#555")
-        y -= 0.0162
+        c = colors[l2_names.index(l2n)]
+        ax_lg.add_patch(Rectangle((0.02, y - 0.004), 0.045, 0.013,
+                                  facecolor=c, edgecolor="none"))
+        ax_lg.text(0.075, y, l2n, fontsize=7.5, va="top", color="#444")
+        y -= 0.0175
 
     output.parent.mkdir(parents=True, exist_ok=True)
     fig.savefig(output, dpi=120, bbox_inches="tight", facecolor="white")

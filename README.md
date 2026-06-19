@@ -75,9 +75,9 @@ uv run python plots/industry_heatmap.py --date 2026-06-18
 - 行业分类：`{data_path}/csindex/industry/{date}.xlsx`（取最新一份）
 - 当日行情：`{data_path}/finance_sina/stock_quote/{date}.csv`（实时源；缺失时回退 `eastmoney/stock_quote`，已停更于 2025-11）
 
-### industry_turnover_stack — 行业成交额占比堆叠柱状图（时序）
+### industry_turnover_stack — 行业成交额占比 river 图（streamgraph，时序）
 
-每根柱子 = 一个交易日，柱高 100% = 当日全市场成交额，按中证二级行业堆叠：段高 = 该行业成交额占比（%），段色 = 该行业成交额加权涨跌幅（红涨绿跌）。行业按 (一级代码, 二级代码) 固定排序，一级分组在堆叠里连续。
+每条带 = 一个中证二级行业的成交额占比，沿时间连续流动（weighted-wiggle 基线）。每个行业一种固定颜色（按一级行业色相分组、组内二级用亮度区分），同色 = 同行业，便于追踪单一行业的连贯演变。行业按 (一级代码, 二级代码) 固定排序。
 
 ```bash
 # 最近 30 个日历日内的交易日（默认）
