@@ -1732,6 +1732,38 @@ def _gov_stat_parse_indicator_table(path: Path) -> list[tuple[str, str, float]]:
     return out
 
 
+def _gov_stat_fill_jan_feb(df: pl.DataFrame) -> pl.DataFrame:
+    """对「当期值」指标，用 2 月累计值的一半补全 1、2 月当期值缺失（统计局 1-2 月
+    合并发布所致）。按 indicator 名自动配对：含「当期值」的，配对其「累计值」变体。
+    合计平分：1 月 = 2 月累计 / 2，2 月 = 2 月累计 / 2（与官方累计值自洽）。
+    仅补当期值；累计值/同比等列的 1 月仍按原始（2 月累计值原本就有）。"""
+    indicators = df["indicator"].unique().to_list()
+    pairs = [(ind, ind.replace("当期值", "累计值")) for ind in indicators
+             if "当期值" in ind and ind.replace("当期值", "累计值") in indicators]
+    if not pairs:
+        return df
+
+    d = df.with_columns(pl.col("date").str.to_date("%Y-%m"))
+    wide = d.pivot(on="indicator", values="value", index="date").sort("date")
+    # 补齐完整月历，否则没有任何指标的 1 月不会出现在表里
+    full = pl.DataFrame({"date": pl.date_range(wide["date"].min(), wide["date"].max(),
+                                               "1mo", eager=True)})
+    wide = full.join(wide, on="date", how="left")
+    wide = wide.with_columns(pl.col("date").dt.year().alias("_y"),
+                             pl.col("date").dt.month().alias("_m"))
+    for cur, acc in pairs:
+        feb = wide.filter(pl.col("_m") == 2).select("_y", pl.col(acc).alias("_feb"))
+        wide = wide.join(feb, on="_y", how="left")
+        cond = pl.col("_m").is_in([1, 2]) & pl.col(cur).is_null() & pl.col("_feb").is_not_null()
+        wide = wide.with_columns(pl.when(cond).then(pl.col("_feb") / 2).otherwise(pl.col(cur)).alias(cur))
+        wide = wide.drop("_feb")
+    ind_cols = [c for c in wide.columns if c not in ("date", "_y", "_m")]
+    long = (wide.unpivot(on=ind_cols, index="date", variable_name="indicator", value_name="value")
+                 .filter(pl.col("value").is_not_null())
+                 .with_columns(pl.col("date").dt.strftime("%Y-%m")))
+    return long.sort(["date", "indicator"])
+
+
 def _convert_gov_stat_monthly_indicators(
     data_path: str, output_dir: str, src_name: str, out_name: str,
     year_start: int = 2000, year_end: int = 2026,
@@ -1759,6 +1791,7 @@ def _convert_gov_stat_monthly_indicators(
         "indicator": [r[1] for r in records],
         "value": [r[2] for r in records],
     }).sort(["date", "indicator"])
+    df = _gov_stat_fill_jan_feb(df)
     df.write_csv(out_path / f"{out_name}.csv")
     print(f"Saved {out_name}: {len(df)} rows to {out_path}")
     return len(df)
