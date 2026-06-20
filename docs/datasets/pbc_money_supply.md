@@ -4,8 +4,9 @@
 
 | 项 | 内容 |
 |---|------|
-| 命令 | `uv run python -m quant.cli pbc-money-supply --data-path <readonly> --output-dir <dataset>` |
+| 命令 | `uv run python -m quant.cli pbc-money-supply --data-path <readonly> --output-dir <dataset> --credit-funds-csv <credit_funds.csv>` |
 | 输入 | `{data_path}/gov_pbc/{year}/[货币统计概览/]货币供应量[表].{htm,xls,xlsx}` |
+| 依赖 | `credit_funds.csv`（用于 m1_new 的住户活期存款近似，须先跑 `pbc-credit-funds`） |
 | 输出 | `{output_dir}/pbc/money_supply.csv`，宽表，2004-01 起 |
 | 格式优先级 | xlsx > xls > htm（有电子表格就不用 htm） |
 
@@ -14,8 +15,33 @@
 |------|------|
 | date | 月份 YYYY-MM |
 | m0 | 流通中货币/现金 M0（亿元） |
-| m1 | 货币 M1（亿元） |
+| m1 | 货币 M1（亿元，**原始口径**：2025-01 前为旧口径，2025-01+ 为新口径） |
+| m1_new | **新口径 M1（可比序列）**，见下 |
 | m2 | 货币和准货币 M2（亿元） |
+
+## m1_new 算法（消除 2025-01 口径断点）
+
+央行自 2025-01 起扩 M1 口径（新增个人活期存款、非银支付机构客户备付金），
+导致 m1 当月从 67 万亿跳到 112 万亿。m1_new 列按以下规则回填出一条连续可比序列：
+
+| 期间 | m1_new 取值 | 精度 |
+|---|---|---|
+| **2025-01+** | 直接用 m1（已是新口径） | 精确 |
+| **2024 全年** | 央行 2025 文件官方回填的新口径值 | 精确 |
+| **2015-2023 / 2007-2010 / 1999-2006** | 旧 m1 + credit_funds 的住户活期存款 | 近似（误差 +2.5%，即非银支付备付金） |
+| **2011-2014** | NULL（信贷表未拆住户活期，无数据） | — |
+
+**精度验证**（2024 全年，近似值 vs 央行官方回填）：
+
+```
+月份     旧M1+住户活期   央行新M1      差额      差额/M1
+2024-01   1,090,893     1,120,120    +29,227    +2.61%
+2024-06   1,061,422     1,089,170    +27,748    +2.55%
+2024-12   1,084,618     1,113,069    +28,451    +2.56%
+```
+
+差额稳定在 +2.5%~2.7%，即「非银支付机构客户备付金」（支付宝/微信备付金），
+本数据集无法单独获取，作为系统误差接受。
 
 ## 源数据坑
 
@@ -24,9 +50,12 @@
 - **M0 名称变体**：早期「流通中现金（M0）」，近年「流通中货币（M0）」，已归一化到同一列。
 - **层级缩进**：M1/M0 项目名通过列位置表示层级（M1 在第 1 列、M0 在第 2 列）。解析用「行内数字序列」法——每行第一个非数字单元格作项目名，其余数字按序对应月份。
 - **Excel 月份截断**：xlsx 里 10 月单元格是数字 `2024.10`，被 Excel 存成浮点 `2024.1`（与 1 月同值）。月份严格按列位置推断（第 i 个数据列 = 第 i 个月），不解析数值。
+- **2025 文件含 2024 M1 回填段**：央行在 2025 年文件末尾的注释块里官方回填了 2024 全年新口径 M1（注释行 → 月份行 → 余额行的三段式布局），由 `_pbc_parse_m1_backfill_2024` 单独解析，用于精确填 m1_new 的 2024 段。
 
 ## 使用示例
 
 ```bash
-uv run python -m quant.cli pbc-money-supply --data-path /mnt/readonly_dataset --output-dir /mnt/dataset
+# 必须先跑 pbc-credit-funds（m1_new 依赖）
+uv run python -m quant.cli pbc-credit-funds --data-path /mnt/readonly_dataset --output-dir /mnt/dataset
+uv run python -m quant.cli pbc-money-supply --data-path /mnt/readonly_dataset --output-dir /mnt/dataset --credit-funds-csv /mnt/dataset/pbc/credit_funds.csv
 ```
