@@ -1775,6 +1775,110 @@ def convert_pbc_money_supply(data_path: str, output_dir: str,
     return len(df)
 
 
+def convert_pbc_overseas_rmb_assets(data_path: str, output_dir: str) -> int:
+    """境外机构和个人持有境内人民币金融资产（月末存量），宽表
+    date/股票/债券/贷款/存款（亿元）。
+    源：gov_pbc/{year}/货币统计概览/境外机构和个人持有境内人民币金融资产情况
+    [Domestic RMB Financial Assets Held by Overseas Entities].{htm,xls,xlsx}，2014 起。
+
+    每个文件是「项目×月份」宽表：行=股票/债券/贷款/存款，列=当年 12 个月。
+    用「行内数字序列」法对齐（项目名=首个非数字单元格，值=其后数字按序），
+    不依赖绝对列索引——因为 2014 htm 的表头与数据行列不对齐（表头首列是
+    「2013年末」，数据首列是项目名，数据多一个前导空列）。
+    两个坑：
+      - Excel 把 10 月单元格 2024.10 存成 2024.1（与 1 月同值），月份严格按
+        数据列位置推断（_pbc_period_to_date），不解析浮点数值；
+      - 2014 文件表头多一个「2013年末」期末列（非月度），用 _pbc_parse_period_str
+        过滤掉，并在数据行多出对应值时跳过前导期末值。
+    项目名清洗：源文件是「中文\\n English」，_pbc_norm_item 去换行 + 尾部英文。
+    """
+    src_root = Path(data_path) / "gov_pbc"
+    out_path = Path(output_dir) / "pbc"
+    out_path.mkdir(parents=True, exist_ok=True)
+
+    targets = {"股票", "债券", "贷款", "存款"}
+    grid: dict[str, dict[str, float]] = {}
+
+    for year in range(2014, 2027):
+        yd = src_root / str(year)
+        if not yd.is_dir():
+            continue
+        fp = _pbc_find_file(yd, ["货币统计概览"], ["境外机构"])
+        if fp is None:
+            print(f"  跳过 {year}：找不到境外机构人民币金融资产文件")
+            continue
+        try:
+            rows = _pbc_read_sheet(fp)
+        except Exception as e:
+            print(f"  跳过 {year}：读取失败 {e}")
+            continue
+
+        header_idx = _pbc_find_header_row(rows)
+        if header_idx is None:
+            print(f"  跳过 {year}：找不到表头行")
+            continue
+        header = rows[header_idx]
+
+        # 表头识别月份序列 + 额外期末列数（如 2014 的「2013年末」）。
+        # 用「行内数字序列」法对齐（不依赖绝对列索引，兼容 htm 表头/数据列错位）。
+        months: list[str] = []
+        n_extra = 0
+        for cell in header:
+            if _pbc_is_item_header_cell(cell):
+                continue
+            if not str(cell).strip():
+                continue
+            if _pbc_parse_period_str(cell) is not None:
+                d = _pbc_period_to_date(cell, year, len(months) + 1)
+                if d:
+                    months.append(d)
+            else:
+                n_extra += 1  # 非月份数据列（如「2013年末」）
+        if not months:
+            print(f"  跳过 {year}：未识别到月份列")
+            continue
+
+        n_year = 0
+        for r in rows[header_idx + 1:]:
+            if not r:
+                continue
+            # 行内数字序列法：项目名=首个非数字单元格，值=其后所有数字（按序）
+            name = ""
+            vals: list[float] = []
+            seen_num = False
+            for c in r:
+                if c is None or str(c).strip() == "":
+                    continue
+                v = _pbc_to_float(c)
+                if v is not None:
+                    vals.append(v)
+                    seen_num = True
+                elif not seen_num and not name:
+                    name = _pbc_norm_item(c)
+            if name not in targets:
+                continue
+            # 表头有期末列（n_extra>0）且数据多出对应个数时，跳过前导期末值
+            start = n_extra if (n_extra and len(vals) == len(months) + n_extra) else 0
+            for i, d in enumerate(months):
+                vi = start + i
+                if vi < len(vals) and vals[vi] is not None:
+                    grid.setdefault(d, {})[name] = vals[vi]
+                    n_year += 1
+        print(f"  {year}: {n_year} 个值")
+
+    dates = sorted(grid)
+    df = pl.DataFrame({
+        "date": dates,
+        "股票": [grid[d].get("股票") for d in dates],
+        "债券": [grid[d].get("债券") for d in dates],
+        "贷款": [grid[d].get("贷款") for d in dates],
+        "存款": [grid[d].get("存款") for d in dates],
+    })
+    df.write_csv(out_path / "overseas_rmb_assets.csv")
+    print(f"Saved overseas_rmb_assets: {len(df)} rows to {out_path}")
+    return len(df)
+
+
 def convert_pbc_social_financing_flow(data_path: str, output_dir: str) -> int:
     """社会融资规模增量（流量），长表 date/item/value（亿元）。
     源：gov_pbc/{year}/社会融资规模/[社会融资规模增量统计表|社会融资规模统计表]
