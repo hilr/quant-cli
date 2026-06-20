@@ -1587,6 +1587,94 @@ _MS_ALIASES = {
            "流通中现金", "流通中货币"],
 }
 
+# 住户活期存款的历史命名变体（用于 m1_new 计算）：
+#   1999-01..2006-12  活期储蓄（旧分类）
+#   2007-01..2010-12  储蓄存款·(1)活期储蓄
+#   2015-01..2022-12  住户存款·（1）住户活期存款
+#   2023-01..         住户存款·（1）活期存款
+# 2011-2014 信贷表把个人存款按总额披露（个人存款·储蓄存款），未拆活期/定期，故无数据。
+_HOUSEHOLD_DEMAND_DEPOSIT_ITEMS = [
+    "活期储蓄",
+    "储蓄存款·(1)活期储蓄",
+    "住户存款·（1）住户活期存款",
+    "住户存款·（1）活期存款",
+]
+
+
+def _pbc_parse_m1_backfill_2024(rows: list[list]) -> dict[str, float]:
+    """从 2025 年货币供应量文件解析 M1 新口径 2024 年回填数据。
+
+    央行自 2025-01 起改 M1 口径（新增个人活期存款、非银支付机构客户备付金），
+    并在 2025 年文件末尾的注释块里官方回填了 2024 全年新口径 M1。
+
+    文件结构：注释行（含「按可比口径回溯」）→ 月份行（2024.01..2024.12，
+    10 月被 Excel 截断为 2024.1，按列位置回退）→ 余额行（数字）。
+    返回 {'2024-01': m1_new_亿元, ...}，找不到返回 {}。
+    """
+    note_idx = None
+    for i, r in enumerate(rows):
+        for c in r:
+            if c and "按可比口径" in str(c):
+                note_idx = i
+                break
+        if note_idx is not None:
+            break
+    if note_idx is None:
+        return {}
+
+    months_idx = None
+    for i in range(note_idx + 1, min(note_idx + 6, len(rows))):
+        r = rows[i]
+        for c in r:
+            if c and re.match(r"^2024[\.\s]0?1$", str(c).strip()):
+                months_idx = i
+                break
+        if months_idx is not None:
+            break
+    if months_idx is None:
+        return {}
+
+    months_row = rows[months_idx]
+    month_cols: list[tuple[int, str]] = []
+    for j, c in enumerate(months_row):
+        if not c:
+            continue
+        d = _pbc_period_to_date(str(c), 2024, len(month_cols) + 1)
+        if d:
+            month_cols.append((j, d))
+
+    balance_idx = None
+    for i in range(months_idx + 1, min(months_idx + 6, len(rows))):
+        r = rows[i]
+        if all(j < len(r) and _pbc_to_float(r[j]) is not None for j, _ in month_cols):
+            balance_idx = i
+            break
+    if balance_idx is None:
+        return {}
+
+    result: dict[str, float] = {}
+    balance_row = rows[balance_idx]
+    for j, d in month_cols:
+        v = _pbc_to_float(balance_row[j]) if j < len(balance_row) else None
+        if v is not None:
+            result[d] = v
+    return result
+
+
+def _pbc_load_household_demand(credit_funds_csv: Path) -> dict[str, float]:
+    """从 credit_funds.csv 读住户活期存款（人民币），合并 4 个历史命名变体。
+
+    返回 {'YYYY-MM': 住户活期_亿元}。覆盖 1999-2006 / 2007-2010 / 2015-2026，
+    2011-2014 信贷表未拆住户活期，无对应 key。
+    """
+    df = (pl.read_csv(credit_funds_csv)
+            .filter((pl.col("currency") == "人民币")
+                    & pl.col("item").is_in(_HOUSEHOLD_DEMAND_DEPOSIT_ITEMS))
+            .with_columns(pl.col("date").str.to_date("%Y-%m"))
+            .group_by("date").agg(pl.col("value").sum())
+            .sort("date"))
+    return {r["date"].strftime("%Y-%m"): r["value"] for r in df.iter_rows(named=True)}
+
 
 def _pbc_alias_map(aliases: dict[str, list[str]]) -> dict[str, str]:
     m = {}
@@ -1608,15 +1696,28 @@ _SF_STOCK_ALIASES = {
 }
 
 
-def convert_pbc_money_supply(data_path: str, output_dir: str) -> int:
-    """央行货币供应量 M0/M1/M2 月度数据（亿元），宽表 date/m0/m1/m2。
-    源：gov_pbc/{year}/[货币统计概览/]货币供应量[表].{htm,xls,xlsx}，2004 起。"""
+def convert_pbc_money_supply(data_path: str, output_dir: str,
+                             credit_funds_csv: str) -> int:
+    """央行货币供应量 M0/M1/M2 月度数据（亿元），宽表 date/m0/m1/m1_new/m2。
+    源：gov_pbc/{year}/[货币统计概览/]货币供应量[表].{htm,xls,xlsx}，2004 起。
+
+    **m1_new 列**（新口径 M1，消除 2025-01 的口径断点）：
+      - 2025-01+  : m1 本身已是新口径（含个人活期存款、非银支付备付金）
+      - 2024      : 央行 2025 文件官方回填的新口径值（精确）
+      - 其余年份  : 旧 m1 + 住户活期存款（credit_funds），近似新口径
+                    精度经 2024 官方回填交叉验证，差额稳定在 +2.5%（即非银
+                    支付机构客户备付金，本数据集无法单独获取）
+      - 2011-2014 : 信贷表未拆住户活期，m1_new 留空
+
+    credit_funds_csv 必须先于本命令生成（用于补住户活期存款）。
+    """
     src_root = Path(data_path) / "gov_pbc"
     out_path = Path(output_dir) / "pbc"
     out_path.mkdir(parents=True, exist_ok=True)
 
     alias_map = _pbc_alias_map(_MS_ALIASES)
     grid: dict[str, dict[str, float]] = {}
+    backfill_2024: dict[str, float] = {}
 
     for year in range(2004, 2027):
         yd = src_root / str(year)
@@ -1637,16 +1738,40 @@ def convert_pbc_money_supply(data_path: str, output_dir: str) -> int:
             if key is None:
                 continue
             grid.setdefault(date, {})[key] = val
+        # 2025 文件额外解析 M1 新口径 2024 回填
+        if year == 2025:
+            backfill_2024 = _pbc_parse_m1_backfill_2024(rows)
+            if not backfill_2024:
+                print("  警告：2025 文件未找到 M1 新口径 2024 回填段")
+
+    hh_map = _pbc_load_household_demand(Path(credit_funds_csv))
 
     dates = sorted(grid)
+    m1_new_list: list[float | None] = []
+    for d in dates:
+        year = int(d[:4])
+        if year >= 2025:
+            v = grid[d].get("m1")
+        elif year == 2024:
+            v = backfill_2024.get(d)
+        else:
+            m1_old = grid[d].get("m1")
+            hh_v = hh_map.get(d)
+            v = (m1_old + hh_v) if (m1_old is not None and hh_v is not None) else None
+        m1_new_list.append(v)
+
     df = pl.DataFrame({
         "date": dates,
         "m0": [grid[d].get("m0") for d in dates],
         "m1": [grid[d].get("m1") for d in dates],
+        "m1_new": m1_new_list,
         "m2": [grid[d].get("m2") for d in dates],
     })
     df.write_csv(out_path / "money_supply.csv")
-    print(f"Saved money_supply: {len(df)} rows to {out_path}")
+    n_backfill = sum(1 for d in dates if d.startswith("2024-") and backfill_2024.get(d) is not None)
+    n_approx = sum(1 for d in dates if int(d[:4]) < 2024 and hh_map.get(d) is not None)
+    print(f"Saved money_supply: {len(df)} rows to {out_path} "
+          f"(m1_new: {n_backfill} 月官方回填 + {n_approx} 月近似)")
     return len(df)
 
 

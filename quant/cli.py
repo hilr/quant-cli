@@ -233,10 +233,20 @@ def industry_profit(
 def pbc_money_supply(
     data_path: str = "/mnt/readonly_dataset",
     output_dir: str = "/mnt/dataset",
+    credit_funds_csv: str = "/mnt/dataset/pbc/credit_funds.csv",
 ) -> None:
-    """央行货币供应量 M0/M1/M2 月度数据（亿元），宽表 date/m0/m1/m2，2004 起"""
+    """央行货币供应量 M0/M1/M2 月度数据（亿元），宽表 date/m0/m1/m1_new/m2，2004 起
+
+    m1_new = 新口径 M1（2025-01 央行扩口径后的可比序列）：2025+ 直接用 m1，
+    2024 用央行 2025 文件官方回填，其余年份用「旧 m1 + 住户活期存款」近似。
+    需先跑 pbc-credit-funds 生成 credit_funds.csv。
+    """
     console.print(f"[cyan]生成央行货币供应量数据...[/cyan]")
-    count = convert_pbc_money_supply(data_path=data_path, output_dir=output_dir)
+    count = convert_pbc_money_supply(
+        data_path=data_path,
+        output_dir=output_dir,
+        credit_funds_csv=credit_funds_csv,
+    )
     console.print(f"[green]完成! 共 {count} 条月度记录[/green]")
 
 
