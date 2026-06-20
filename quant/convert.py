@@ -1272,6 +1272,17 @@ def _pbc_to_float(v) -> float | None:
 _PBC_EN_TAIL = re.compile(r"(?:\s+|(?<=[）)]))[A-Za-z].*$")
 _PBC_CN_PREFIX = re.compile(r"^[一二三四五六七八九十]+、")
 
+# 信贷收支表 / 资产负债表的层级前缀（消歧用）：
+#   一、/二、 …     顶级分项（来源/运用方），出现即重置层级上下文
+#   （一）/（二） … 子段（境内/境外），同上
+#   1./2. …        分组父项（住户存款、企（事）业单位贷款 …）
+#   （1）/（2） …   分组下的子项（活期存款、短期贷款 …），跨分组重名
+#   其中：…         上级行的「其中」明细（资产负债表：对政府债权/政府存款下均有「其中：中央政府」）
+_PBC_TOP_SECTION = re.compile(r"^[一二三四五六七八九十]+、")
+_PBC_SUB_SECTION = re.compile(r"^[（(][一二三四五六七八九十]+[）)]")
+_PBC_GROUP_PARENT = re.compile(r"^(\d+)\.\s*(.*)$")
+_PBC_GROUP_CHILD = re.compile(r"^[（(](\d+)[）)]\s*(.*)$")
+
 
 def _pbc_norm_item(raw) -> str:
     if not raw:
@@ -1341,14 +1352,22 @@ def _pbc_row_is_note(name: str) -> bool:
     return n.startswith("注") or "注：" in n or "注:" in n or n.lower().startswith("note")
 
 
-def _pbc_parse_wide_months(rows: list[list[str]], year: int) -> list[tuple[str, str, float]]:
+def _pbc_parse_wide_months(rows: list[list[str]], year: int,
+                           disambiguate: bool = False) -> list[tuple[str, str, float]]:
     """解析「项目在行、月份在列」的宽表。
     返回 [(date, item_norm, value), ...]，跳过空值和注释行。
 
     用「行内数字序列」法：每行的项目名 = 第一个非空非数字单元格，
     数据值 = 该行其余数字单元格（按列顺序）。月份由表头数据列按位置推断
     （不依赖浮点数值，因 Excel 会把 2024.10 截断为 2024.1）。这能兼容
-    货币供应量表 M1/M0 因层级缩进把项目名放在数据列位置的情况。"""
+    货币供应量表 M1/M0 因层级缩进把项目名放在数据列位置的情况。
+
+    disambiguate=True 时按层级前缀给同名子项补父级上下文（用「·」拼接），
+    消除跨分组重名导致的重复：
+      （1）活期存款      → 住户存款·（1）活期存款 / 非金融企业存款·（1）活期存款
+      消费贷款（裸项）   → 住户贷款·短期贷款·消费贷款 / 住户贷款·中长期贷款·消费贷款
+      其中：中央政府     → 对政府债权·其中：中央政府 / 政府存款·其中：中央政府
+    顶级分项（一、/（一））、分组父项（1.）保持原名；货币供应量等无层级表不受影响。"""
     header_idx = _pbc_find_header_row(rows)
     if header_idx is None:
         return []
@@ -1365,10 +1384,14 @@ def _pbc_parse_wide_months(rows: list[list[str]], year: int) -> list[tuple[str, 
         return []
 
     out: list[tuple[str, str, float]] = []
+    cur_group = None   # 最近分组父项标签，如「住户存款」（来自 1./2. 行）
+    cur_inter = None   # 最近分组子项标签，如「短期贷款」（来自 （1）行），裸项的父
+    cur_parent = None  # 最近非「其中」行，作为「其中：」明细的父级
     for r in rows[header_idx + 1:]:
         if not r:
             continue
         name = ""
+        raw_cell = None
         nums: list[float] = []
         for c in r:
             if c is None or str(c).strip() == "":
@@ -1380,41 +1403,142 @@ def _pbc_parse_wide_months(rows: list[list[str]], year: int) -> list[tuple[str, 
                 cand = _pbc_norm_item(c)
                 if cand:
                     name = cand
+                    raw_cell = c
         if not name:
             continue
         if _pbc_row_is_note(name):
             break
+        qname = _pbc_qualify_item(name, raw_cell, disambiguate,
+                                  cur_group, cur_inter, cur_parent)
+        # 更新层级上下文：按本行在层级中的位置推进
+        if disambiguate:
+            top = raw_cell is not None and bool(
+                _PBC_TOP_SECTION.match(str(raw_cell).lstrip().replace("　", " ")))
+            mg = _PBC_GROUP_PARENT.match(name)
+            ms = _PBC_SUB_SECTION.match(name)
+            mi = _PBC_GROUP_CHILD.match(name)
+            if top or ms:
+                cur_group = None
+                cur_inter = None
+                cur_parent = name
+            elif mg:
+                cur_group = mg.group(2).strip()
+                cur_inter = None
+                cur_parent = name
+            elif mi:
+                cur_inter = mi.group(2).strip()
+                cur_parent = name
+            elif not name.startswith("其中"):
+                # 裸项：作为后续「其中」的潜在父级，但不改 cur_group/cur_inter
+                cur_parent = name
         for date, v in zip(month_dates, nums):
-            out.append((date, name, v))
+            out.append((date, qname, v))
     return out
+
+
+def _pbc_qualify_item(name: str, raw_cell, disambiguate: bool,
+                      cur_group, cur_inter, cur_parent) -> str:
+    """按层级上下文给 item 名补父级前缀（disambiguate=True 时）。否则原样返回。"""
+    if not disambiguate:
+        return name
+    # 顶级行保持原名，绝不补父级：
+    #   - 分组父项（1./2./3.…）：住户存款、非金融企业存款、机关团体存款 … 互为兄弟，
+    #     不能因为前一行是「1.住户存款」就把「2.非金融企业存款」当成它的子项。
+    #   - 子段（（一）/（二）…）：境内存款/境内贷款 等。
+    #   - 章节标题（一、/二、…）：被 _pbc_norm_item 剥掉前缀，故用 raw_cell 判定。
+    if _PBC_GROUP_PARENT.match(name) or _PBC_SUB_SECTION.match(name):
+        return name
+    if raw_cell is not None:
+        s = str(raw_cell).lstrip().replace("　", " ")
+        if _PBC_TOP_SECTION.match(s):
+            return name
+    mi = _PBC_GROUP_CHILD.match(name)
+    if mi:
+        return f"{cur_group}·{name}" if cur_group else name
+    if name.startswith("其中"):
+        return f"{cur_parent}·{name}" if cur_parent else name
+    # 裸项：直接挂在分组下时用 cur_group，挂在 （N）子项下时再叠一层 cur_inter
+    if cur_inter and cur_group:
+        return f"{cur_group}·{cur_inter}·{name}"
+    if cur_inter:
+        return f"{cur_inter}·{name}"
+    if cur_group:
+        return f"{cur_group}·{name}"
+    return name
+
+
+_PBC_FLOW_NOISE = re.compile(r"^(Unit|Chart|Month|Item|项目|单位)", re.IGNORECASE)
+
+
+def _pbc_flow_table_unit(rows: list[list[str]], header_idx: int) -> str:
+    """从表头行向上找最近的「单位：/Unit:」标记，判断该表是增量(亿)还是占比(%)。"""
+    for k in range(header_idx - 1, -1, -1):
+        r = rows[k]
+        cv = _pbc_norm_item(r[0]) if r and r[0] else ""
+        if cv.startswith("单位") or cv.lower().startswith("unit"):
+            return "%" if "%" in cv else "亿"
+        if cv.startswith("表") or cv == "月份":
+            break
+    return "亿"
 
 
 def _pbc_parse_flow_long(rows: list[list[str]]) -> list[tuple[str, str, float]]:
     """解析社融增量长表：月份在第 1 列（行），分项在表头列。
-    返回 [(date, item, value), ...]。"""
-    header_idx = None
-    for i, r in enumerate(rows):
-        if r and r[0] and ("月份" in str(r[0]) or "month" in str(r[0]).lower()):
-            header_idx = i
-            break
-    if header_idx is None:
-        return []
-    header = rows[header_idx]
-    item_cols = [(j, _pbc_norm_item(header[j])) for j in range(1, len(header))
-                 if header[j] and str(header[j]).strip() and not _pbc_is_item_header_cell(header[j])]
-    out = []
-    for r in rows[header_idx + 1:]:
-        if not r or not r[0] or not str(r[0]).strip():
+    返回 [(date, item, value), ...]。
+
+    单个 .xls/.htm 常把多张表堆在一个 sheet 里（如 2019 年：主增量表 + 表1 完善后
+    增量表 + 表2 占比表），这里按表头「月份」拆表，并：
+      - 用归一化 c0=='月份' 定位表头（避开早期合并单元格「项目\\n月份」）；
+      - 表头出现「其中」时按两行表头合并（第二行才是真正分项名）；
+      - 向上查「单位：」标记，剔除占比(%)表；
+      - 数据区遇「注：/表N：/新月份表头」即停，绝不跨表混读。"""
+    n = len(rows)
+    out: list[tuple[str, str, float]] = []
+    i = 0
+    while i < n:
+        r = rows[i]
+        if not (r and r[0] and _pbc_norm_item(r[0]) == "月份"):
+            i += 1
             continue
-        parsed = _pbc_parse_period_str(r[0])
-        if parsed is None:
-            continue
-        date = f"{parsed[0]:04d}-{parsed[1]:02d}"
-        for j, item in item_cols:
-            val = _pbc_to_float(r[j]) if j < len(r) else None
-            if val is None:
+        header = r
+        two_row = i + 1 < n and any(_pbc_norm_item(header[j]) == "其中"
+                                    for j in range(1, len(header)))
+        second = rows[i + 1] if two_row else None
+        item_cols: list[tuple[int, str]] = []
+        for j in range(1, len(header)):
+            v = _pbc_norm_item(header[j])
+            if v in ("", "其中"):
+                if second and j < len(second):
+                    v2 = _pbc_norm_item(second[j])
+                    v = v2 if (v2 and v2 != "其中") else ""
+                else:
+                    v = ""
+            if v and not _pbc_is_item_header_cell(v):
+                item_cols.append((j, v))
+        is_ratio = _pbc_flow_table_unit(rows, i) == "%"
+        start = i + 2 if two_row else i + 1
+        for rr in rows[start:]:
+            if not rr:
                 continue
-            out.append((date, item, val))
+            c0 = str(rr[0]).strip()
+            if not c0:
+                continue
+            parsed = _pbc_parse_period_str(rr[0])
+            if parsed is None:
+                nv = _pbc_norm_item(rr[0])
+                # 英文翻译/单位/Chart 等噪声行跳过；表/注/新表头 → 本表结束
+                if (nv.startswith("表") or nv.startswith("注") or nv == "月份"
+                        or not _PBC_FLOW_NOISE.match(nv)):
+                    break
+                continue
+            if is_ratio:
+                continue
+            date = f"{parsed[0]:04d}-{parsed[1]:02d}"
+            for j, item in item_cols:
+                val = _pbc_to_float(rr[j]) if j < len(rr) else None
+                if val is not None:
+                    out.append((date, item, val))
+        i += 1
     return out
 
 
@@ -1474,8 +1598,9 @@ def _pbc_alias_map(aliases: dict[str, list[str]]) -> dict[str, str]:
 
 # 社融分项跨年命名变体（早期口径 vs 现代口径）
 _SF_FLOW_ALIASES = {
-    "社会融资规模增量": ["社会融资规模增量", "社会融资规模"],
+    "社会融资规模增量": ["社会融资规模增量", "社会融资规模", "社会融资规模当月增量"],
     "人民币贷款": ["人民币贷款", "其中:人民币贷款", "其中：人民币贷款"],
+    "外币贷款（折合人民币）": ["外币贷款（折合人民币）", "外币贷款（折合人民币)"],
 }
 _SF_STOCK_ALIASES = {
     "社会融资规模存量": ["社会融资规模存量"],
@@ -1528,13 +1653,20 @@ def convert_pbc_money_supply(data_path: str, output_dir: str) -> int:
 def convert_pbc_social_financing_flow(data_path: str, output_dir: str) -> int:
     """社会融资规模增量（流量），长表 date/item/value（亿元）。
     源：gov_pbc/{year}/社会融资规模/[社会融资规模增量统计表|社会融资规模统计表]
-    .{htm,xls,xlsx}，2012 起。2012-2014 为宽表（htm），2015+ 为长表。"""
+    .{htm,xls,xlsx}，2012 起。2012-2014 为宽表（htm），2015+ 为长表。
+
+    单个文件常把多张表堆在一个 sheet 里（主增量表 + 完善后增量表 + 占比表），
+    _pbc_parse_flow_long 按表头拆表、剔除占比(%)表、合并两行表头；跨年按最新
+    修订取值（口径调整年如 2019 会回填历史数据，越新的文件越权威），保证
+    (date,item) 唯一。"""
     src_root = Path(data_path) / "gov_pbc"
     out_path = Path(output_dir) / "pbc"
     out_path.mkdir(parents=True, exist_ok=True)
     alias_map = _pbc_alias_map(_SF_FLOW_ALIASES)
 
-    records: list[tuple[str, str, float]] = []
+    # 按年升序处理；同一 (date,item) 以最新年份（最新修订）为准。
+    # 央行在统计口径调整年（如 2019）会把历史数据回填进新表，故越新的文件越权威。
+    best: dict[tuple[str, str], float] = {}
     for year in range(2012, 2027):
         yd = src_root / str(year) / "社会融资规模"
         if not yd.is_dir():
@@ -1555,12 +1687,13 @@ def convert_pbc_social_financing_flow(data_path: str, output_dir: str) -> int:
         except Exception as e:
             print(f"  跳过 {year}：解析失败 {e}")
             continue
-        records.extend(recs)
+        for date, item, val in recs:
+            best[(date, alias_map.get(item, item))] = val
 
     df = pl.DataFrame({
-        "date": [r[0] for r in records],
-        "item": [alias_map.get(r[1], r[1]) for r in records],
-        "value": [r[2] for r in records],
+        "date": [k[0] for k in best],
+        "item": [k[1] for k in best],
+        "value": list(best.values()),
     }).sort(["date", "item"])
     df.write_csv(out_path / "social_financing_flow.csv")
     print(f"Saved social_financing_flow: {len(df)} rows to {out_path}")
@@ -1608,7 +1741,11 @@ def convert_pbc_credit_funds(data_path: str, output_dir: str) -> int:
     """金融机构信贷收支表（存贷款），长表 date/currency/item/value（亿元）。
     currency ∈ {本外币, 人民币}。全明细输出（含各项存款、各项贷款、资金来源/运用
     总计及所有分项）。源：gov_pbc/{year}/[金融机构信贷收支统计/]金融机构{本外币,人民币}
-    信贷收支表.{htm,xls,xlsx}，1999 起（本外币口径部分年份缺失）。"""
+    信贷收支表.{htm,xls,xlsx}，1999 起（本外币口径部分年份缺失）。
+
+    item 带层级上下文（「·」拼接）以保证唯一：跨分组重名的子项补父级，如
+    「住户存款·（1）活期存款」「非金融企业存款·（1）活期存款」「住户贷款·短期贷款·消费贷款」；
+    顶级分项（各项存款/贷款）、分组父项（1.住户存款）保持原名。详见 _pbc_parse_wide_months。"""
     src_root = Path(data_path) / "gov_pbc"
     out_path = Path(output_dir) / "pbc"
     out_path.mkdir(parents=True, exist_ok=True)
@@ -1628,7 +1765,7 @@ def convert_pbc_credit_funds(data_path: str, output_dir: str) -> int:
                 continue
             try:
                 rows = _pbc_read_sheet(fp)
-                recs = _pbc_parse_wide_months(rows, year)
+                recs = _pbc_parse_wide_months(rows, year, disambiguate=True)
             except Exception as e:
                 print(f"  跳过 {currency} {year}：{e}")
                 continue
@@ -1649,7 +1786,10 @@ def convert_pbc_credit_funds(data_path: str, output_dir: str) -> int:
 def convert_pbc_central_bank_balance_sheet(data_path: str, output_dir: str) -> int:
     """货币当局资产负债表，长表 date/item/value（亿元）。全明细输出（资产方+
     负债方各项，含总资产/总负债）。源：gov_pbc/{year}/[货币统计概览/]货币当局资产
-    负债表.{htm,xls,xlsx}，1999 起。"""
+    负债表.{htm,xls,xlsx}，1999 起。
+
+    「其中：」明细补父级以消歧：资产方与负债方均有「其中：中央政府」，输出为
+    「对政府债权·其中：中央政府」「政府存款·其中：中央政府」。详见 _pbc_parse_wide_months。"""
     src_root = Path(data_path) / "gov_pbc"
     out_path = Path(output_dir) / "pbc"
     out_path.mkdir(parents=True, exist_ok=True)
@@ -1665,7 +1805,7 @@ def convert_pbc_central_bank_balance_sheet(data_path: str, output_dir: str) -> i
             continue
         try:
             rows = _pbc_read_sheet(fp)
-            recs = _pbc_parse_wide_months(rows, year)
+            recs = _pbc_parse_wide_months(rows, year, disambiguate=True)
         except Exception as e:
             print(f"  跳过 {year}：{e}")
             continue
