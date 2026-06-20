@@ -1,13 +1,16 @@
-"""进出口顺差：滚动 12 个月合计及其同比。
+"""进出口顺差：滚动 12 个月合计、同比，及与沪深300的对照（上图双轴）。
 
 滚 12 合计 = 当月及前 11 个月的顺差（出口-进口，差额当期值）之和，平滑月度波动；
-同比 = 滚12[t] / 滚12[t-12] - 1。
+同比 = 滚12[t] / 滚12[t-12] - 1。上图左轴为滚 12 顺差合计（亿美元），右轴叠加
+沪深300月末收盘，便于对照顺差扩张与 A 股走势。
 
 早期（2005 年前后）同比出现数百 % 的尖峰并非数据错误：2004→2005 中国贸易
 顺差历史性暴增（全年 328→1021 亿美元），源于 2005 年全球纺织品配额取消、
 入世过渡期结束、人民币 7 月汇改前抢出口。2000-2004 顺差盘子小（全年仅
 230-330 亿），进一步放大了同比波动。故同比图从 2003 年起、y 轴裁到 [-60, 130]。
-数据源 gov_stat/trade.csv 的 1-2 月合并缺口已由 convert 补全（合计平分）。
+数据源 gov_stat/trade.csv 的 1-2 月合并缺口已由 convert 补全（合计平分）；
+沪深300取 index_quote_history/000300.parquet 月末收盘，从 2005 年起（该指数
+2005-04 发布，基日 2004-12-31=1000）。
 """
 from __future__ import annotations
 
@@ -35,18 +38,34 @@ def load_surplus_rolling_yoy(trade_file: Path) -> pl.DataFrame:
     return d
 
 
-def plot(d: pl.DataFrame, output_png: Path) -> None:
+def load_hs300(index_file: Path) -> pl.DataFrame:
+    """读沪深300日频收盘，重采样为月末收盘（对齐月度顺差）。"""
+    return (pl.read_parquet(index_file, columns=["date", "close"])
+              .with_columns(pl.col("date").str.to_date("%Y-%m-%d").alias("d"))
+              .sort("d")
+              .group_by(pl.col("d").dt.strftime("%Y-%m").alias("date"))
+              .agg(pl.col("close").last().alias("hs300"))
+              .with_columns(pl.col("date").str.to_date("%Y-%m"))
+              .sort("date"))
+
+
+def plot(d: pl.DataFrame, hs300: pl.DataFrame, output_png: Path) -> None:
     plt.rcParams["font.sans-serif"] = ["Noto Sans SC", "WenQuanYi Zen Hei"]
     plt.rcParams["axes.unicode_minus"] = False
 
     fig, (ax1, ax2) = plt.subplots(2, 1, figsize=(13, 8), sharex=True,
                                     gridspec_kw={"height_ratios": [1, 1.6]})
 
-    ax1.plot(d["date"], d["roll12_亿美元"], color="#1f77b4", lw=1.2)
+    l1, = ax1.plot(d["date"], d["roll12_亿美元"], color="#1f77b4", lw=1.2, label="滚12顺差合计(左轴)")
     ax1.fill_between(d["date"], 0, d["roll12_亿美元"], color="#1f77b4", alpha=0.12)
     ax1.set_ylabel("滚动12个月顺差合计（亿美元）")
-    ax1.set_title("中国进出口顺差：滚动12个月合计及其同比")
+    ax1.set_title("中国进出口顺差：滚动12个月合计及其同比 vs 沪深300")
     ax1.grid(True, alpha=0.3)
+    ax1r = ax1.twinx()
+    l2, = ax1r.plot(hs300["date"], hs300["hs300"], color="#2ca02c", lw=0.8, alpha=0.7, label="沪深300收盘(右轴)")
+    ax1r.set_ylabel("沪深300收盘点位", color="#2ca02c")
+    ax1r.tick_params(axis="y", labelcolor="#2ca02c")
+    ax1.legend(handles=[l1, l2], loc="upper left", fontsize=9)
 
     ax2.plot(d["date"], d["同比%"], color="#d62728", lw=1.2)
     ax2.axhline(0, color="black", lw=0.6)
@@ -81,13 +100,19 @@ def main() -> None:
         help="gov_stat/trade.csv 路径（默认 /mnt/dataset/gov_stat/trade.csv）",
     )
     parser.add_argument(
+        "--index-file", type=Path,
+        default=Path("/mnt/dataset/index_quote_history/000300.parquet"),
+        help="沪深300 parquet（默认 /mnt/dataset/index_quote_history/000300.parquet）",
+    )
+    parser.add_argument(
         "--output", type=Path,
         default=Path("/mnt/dataset/trade_surplus_rolling12_yoy.png"),
         help="输出 PNG 路径",
     )
     args = parser.parse_args()
     d = load_surplus_rolling_yoy(args.trade_file)
-    plot(d, args.output)
+    hs300 = load_hs300(args.index_file)
+    plot(d, hs300, args.output)
 
 
 if __name__ == "__main__":
