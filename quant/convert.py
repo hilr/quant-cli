@@ -2180,3 +2180,74 @@ def convert_gov_stat_retail_sales(data_path: str, output_dir: str) -> int:
     累计同比。源：gov_stats/社会消费品零售总额/{year}.{csv≤2024, xlsx≥2025}，2000 起。"""
     return _convert_gov_stat_monthly_indicators(
         data_path, output_dir, src_name="社会消费品零售总额", out_name="retail_sales")
+
+
+def convert_gov_stat_retail_monthly(data_path: str, output_dir: str) -> int:
+    """社会消费品零售总额「每月新增额」（当月零售额，亿元），宽表 date/总额/限上。
+
+    由累计值年内差分得到：每月新增额[t] = 累计值[t] − 累计值[t−1]，1 月 = 累计值[1月]。
+    2012 年起统计局 1-2 月合并公布，1 月累计值缺失 → 用「2 月累计值 / 2」平分填充，
+    故合并年份 1、2 月新增额均 = 2 月累计值 / 2（与官方累计值自洽）。2011 及以前
+    1-2 月分开公布，1 月累计值原值直接用。
+
+    复用 _gov_stat_parse_indicator_table：指标名去空白统一、过滤「注：/数据来源」脚注。
+    总额 2000 起，限上 2011 起（限上发布略滞后，总额可能多 1 个月）。
+    源：gov_stats/社会消费品零售总额/{year}.{csv≤2024, xlsx≥2025}。
+    """
+    src_root = Path(data_path) / "gov_stats" / "社会消费品零售总额"
+    out_path = Path(output_dir) / "gov_stat"
+    out_path.mkdir(parents=True, exist_ok=True)
+
+    records: list[tuple[str, str, float]] = []
+    for year in range(2000, 2027):
+        fp = src_root / f"{year}.csv"
+        if not fp.exists():
+            fp = src_root / f"{year}.xlsx"
+        if not fp.exists():
+            continue
+        try:
+            records.extend(_gov_stat_parse_indicator_table(fp))
+        except Exception as e:
+            print(f"  跳过 {year}：{e}")
+
+    acc_total = "社会消费品零售总额累计值(亿元)"
+    acc_above = "限上单位消费品零售额累计值(亿元)"
+    df = pl.DataFrame({
+        "date": [r[0] for r in records],
+        "indicator": [r[1] for r in records],
+        "value": [r[2] for r in records],
+    }).filter(pl.col("indicator").is_in([acc_total, acc_above]))
+    if df.is_empty():
+        print("  无累计值记录")
+        return 0
+    kind = (pl.when(pl.col("indicator") == acc_total).then(pl.lit("总额"))
+            .otherwise(pl.lit("限上")))
+    acc = (df.with_columns(pl.col("date").str.to_date("%Y-%m"), kind.alias("kind"))
+             .pivot(on="kind", values="value", index="date")
+             .sort("date"))
+    # 补完整月历（合并年份缺 1 月行，差分前必须先补出）
+    full = pl.DataFrame({"date": pl.date_range(acc["date"].min(), acc["date"].max(),
+                                               "1mo", eager=True)})
+    acc = full.join(acc, on="date", how="left")
+    acc = acc.with_columns(pl.col("date").dt.year().alias("_y"),
+                           pl.col("date").dt.month().alias("_m"))
+
+    out = acc.select("date")
+    for kind_name in ("总额", "限上"):
+        feb = (acc.filter(pl.col("_m") == 2)
+                 .select("_y", pl.col(kind_name).alias("_feb"))
+                 .group_by("_y").agg(pl.col("_feb").first()))
+        w = acc.join(feb, on="_y", how="left")
+        cond = (pl.col("_m") == 1) & pl.col(kind_name).is_null() & pl.col("_feb").is_not_null()
+        w = w.with_columns(pl.when(cond).then(pl.col("_feb") / 2)
+                           .otherwise(pl.col(kind_name)).alias("_acc"))
+        w = w.with_columns(pl.col("_acc").diff().over("_y").alias("_diff"))
+        w = w.with_columns(pl.when(pl.col("_m") == 1).then(pl.col("_acc"))
+                           .otherwise(pl.col("_diff")).alias(kind_name))
+        out = out.with_columns(w[kind_name])
+
+    out = (out.with_columns(pl.col("date").dt.strftime("%Y-%m"))
+             .filter(pl.col("总额").is_not_null() | pl.col("限上").is_not_null()))
+    out.write_csv(out_path / "retail_sales_monthly.csv")
+    print(f"Saved retail_sales_monthly: {len(out)} rows to {out_path}")
+    return len(out)
