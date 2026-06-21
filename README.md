@@ -40,6 +40,7 @@
 | pbc/social_financing_stock | 生成 | 社会融资规模存量 + 增速，长表 | [文档](docs/datasets/pbc_social_financing_stock.md) |
 | pbc/credit_funds | 生成 | 金融机构信贷收支（存贷款全明细），长表 | [文档](docs/datasets/pbc_credit_funds.md) |
 | pbc/central_bank_balance_sheet | 生成 | 货币当局资产负债表（全明细），长表 | [文档](docs/datasets/pbc_central_bank_balance_sheet.md) |
+| pbc/overseas_rmb_assets | 生成 | 境外机构/个人持有境内人民币金融资产（股票/债券/贷款/存款），宽表 | [文档](docs/datasets/pbc_overseas_rmb_assets.md) |
 | gov_stat/trade | 生成 | 海关进出口月度指标（长表） | [文档](docs/datasets/gov_stat_trade.md) |
 | gov_stat/retail_sales | 生成 | 社会消费品零售总额月度指标（长表） | [文档](docs/datasets/gov_stat_retail_sales.md) |
 | stock_quote_history | 生成 | 股票行情历史 | [文档](docs/datasets/stock_quote_history.md) |
@@ -427,6 +428,7 @@ uv run python plots/channel_entry_signals.py --code 512890 --window 120 --k 1.5 
 │        social_financing_stock(社融存量+增速，2015+)              │
 │        credit_funds          (信贷收支，本外币+人民币，1999+)    │
 │        central_bank_balance_sheet (央行资产负债表，1999+)       │
+│        overseas_rmb_assets  (境外持境内金融资产，2014+)         │
 └─────────────────────────────────────────────────────────────────┘
 
 ┌─────────────────────────────────────────────────────────────────┐
