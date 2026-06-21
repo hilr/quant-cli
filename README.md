@@ -43,6 +43,7 @@
 | pbc/overseas_rmb_assets | 生成 | 境外机构/个人持有境内人民币金融资产（股票/债券/贷款/存款），宽表 | [文档](docs/datasets/pbc_overseas_rmb_assets.md) |
 | gov_stat/trade | 生成 | 海关进出口月度指标（长表） | [文档](docs/datasets/gov_stat_trade.md) |
 | gov_stat/retail_sales | 生成 | 社会消费品零售总额月度指标（长表） | [文档](docs/datasets/gov_stat_retail_sales.md) |
+| gov_stat/retail_sales_monthly | 生成 | 社会消费品零售总额每月新增额（宽表，累计值差分） | [文档](docs/datasets/gov_stat_retail_sales_monthly.md) |
 | stock_quote_history | 生成 | 股票行情历史 | [文档](docs/datasets/stock_quote_history.md) |
 | stock_quote_adjusted | 生成 | 前复权行情 | [文档](docs/datasets/stock_quote_adjusted.md) |
 | stock_quote_ta | 生成 | 技术指标 | [文档](docs/datasets/stock_quote_ta.md) |
