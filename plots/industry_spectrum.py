@@ -23,7 +23,7 @@ from matplotlib.colors import Normalize
 from matplotlib.patches import Rectangle
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
-from industry_heatmap import (
+from industry_common import (
     CJK_FONTS, COLOR_LIMIT, RED_GREEN_CMAP,
     load_industry, load_quote, pick_latest_full_date,
 )

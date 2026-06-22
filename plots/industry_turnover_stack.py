@@ -19,7 +19,7 @@ import numpy as np
 import polars as pl
 from matplotlib.patches import Rectangle
 
-from industry_heatmap import (
+from industry_common import (
     CJK_FONTS,
     INDUSTRY_DIR_NAME,
     MIN_FULL_ROWS,
