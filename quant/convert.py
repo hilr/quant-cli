@@ -5,6 +5,7 @@ import zipfile
 from html.parser import HTMLParser
 from xml.etree import ElementTree as ET
 
+import numpy as np
 import polars as pl
 from pathlib import Path
 from python_calamine import CalamineWorkbook
@@ -2251,3 +2252,106 @@ def convert_gov_stat_retail_monthly(data_path: str, output_dir: str) -> int:
     out.write_csv(out_path / "retail_sales_monthly.csv")
     print(f"Saved retail_sales_monthly: {len(out)} rows to {out_path}")
     return len(out)
+
+
+# ============== turnover_concentration ==============
+
+# 行情目录候选：finance_sina 是实时源（1992-），eastmoney 是历史归档（2022-2025 停更）。靠前的优先。
+_TURNOVER_QUOTE_DIRS = ["finance_sina/stock_quote", "eastmoney/stock_quote"]
+# 早期 A 股股票数少（2010 ~1700 只、2015 ~2400 只、2020 ~3800 只），用 1000 行阈值过滤
+# 半截/测试文件但保留 2010 起的完整历史
+_TURNOVER_MIN_ROWS = 1000
+
+
+def _concentration_metrics(x: np.ndarray) -> dict:
+    """5 个集中度算法，输入 turnover>0 的成交额一维数组。"""
+    n = len(x)
+    s = x.sum()
+    if n < 10 or s <= 0:
+        return {k: None for k in ("gini", "alpha", "top5_ratio", "hhi", "cr10")}
+
+    sorted_x = np.sort(x)
+    shares = x / s
+
+    # Gini: (Σ(2i-n-1)·x_i) / (n·Σx_i)
+    gini = float((np.arange(1, n + 1) * 2 - n - 1) @ sorted_x / (n * s))
+
+    # Pareto α: log-log rank vs amount 全点回归斜率绝对值（rank 从大到小）
+    log_ranks = np.log(np.arange(1, n + 1))
+    log_amounts = np.log(sorted_x[::-1])
+    slope = float(np.polyfit(log_ranks, log_amounts, 1)[0])
+    alpha = abs(slope)
+
+    # Top5 / median
+    top5_ratio = float(sorted_x[-5:].mean() / np.median(x))
+
+    # HHI = Σ(share_i²)
+    hhi = float((shares ** 2).sum())
+
+    # CR10 = top 10 shares 之和
+    cr10 = float(np.sort(shares)[-10:].sum())
+
+    return {"gini": gini, "alpha": alpha, "top5_ratio": top5_ratio,
+            "hhi": hhi, "cr10": cr10}
+
+
+def convert_turnover_concentration(
+    data_path: str = DEFAULT_DATA_PATH,
+    output_dir: str = OUTPUT_DATA_PATH,
+    start_year: int = 2010,
+) -> int:
+    """全 A 股日成交额集中度（gini/alpha/top5-median/hhi/cr10），宽表，2010 起。"""
+    root = Path(data_path)
+
+    # 扫所有候选目录的完整交易日，同日靠前目录优先
+    by_date: dict[str, Path] = {}
+    for name in _TURNOVER_QUOTE_DIRS:
+        d = root / name
+        if not d.is_dir():
+            continue
+        for f in d.glob("*.csv"):
+            by_date.setdefault(f.stem, f)
+
+    dates: list[str] = []
+    for dt in sorted(by_date):
+        if int(dt[:4]) < start_year:
+            continue
+        with open(by_date[dt], "rb") as fp:
+            n_rows = sum(1 for _ in fp)
+        if n_rows >= _TURNOVER_MIN_ROWS:
+            dates.append(dt)
+
+    if not dates:
+        raise RuntimeError(f"找不到 {start_year} 起行数 ≥ {_TURNOVER_MIN_ROWS} 的行情文件")
+
+    print(f"完整交易日：{len(dates)} 天（{dates[0]} ~ {dates[-1]}）")
+
+    records = []
+    for i, dt in enumerate(dates):
+        try:
+            # infer_schema_length 提高，避免 turnover/market_cap 等列被早期纯整数行推断为 i64
+            df = pl.read_csv(by_date[dt], infer_schema_length=10000)
+        except Exception as e:
+            print(f"  跳过 {dt}（读取失败：{e}）")
+            continue
+        if "turnover" not in df.columns:
+            continue
+        x = (df.filter(pl.col("turnover") > 0)["turnover"].to_numpy().astype(float))
+        m = _concentration_metrics(x)
+        m["date"] = dt
+        m["stock_count"] = int(len(x))
+        records.append(m)
+        if (i + 1) % 200 == 0:
+            print(f"  {i + 1}/{len(dates)}...")
+
+    if not records:
+        raise RuntimeError("无有效数据")
+
+    out_df = (pl.DataFrame(records)
+              .select(["date", "gini", "alpha", "top5_ratio", "hhi", "cr10", "stock_count"])
+              .sort("date"))
+    out_path = Path(output_dir)
+    out_path.mkdir(parents=True, exist_ok=True)
+    out_df.write_csv(out_path / "turnover_concentration.csv")
+    print(f"Saved turnover_concentration: {len(out_df)} rows to {out_path}")
+    return len(out_df)

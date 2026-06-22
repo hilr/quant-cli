@@ -47,6 +47,7 @@
 | stock_quote_history | 生成 | 股票行情历史 | [文档](docs/datasets/stock_quote_history.md) |
 | stock_quote_adjusted | 生成 | 前复权行情 | [文档](docs/datasets/stock_quote_adjusted.md) |
 | stock_quote_ta | 生成 | 技术指标 | [文档](docs/datasets/stock_quote_ta.md) |
+| turnover_concentration | 生成 | 全 A 股日成交额集中度（gini/alpha/top5-median/hhi/cr10），宽表，2010 起 | [文档](docs/datasets/turnover_concentration.md) |
 | margin_trade_history | 生成 | 融资融券历史 | [文档](docs/datasets/margin_trade_history.md) |
 | margin_trade_daily | 生成 | 融资融券每日净变化 | [文档](docs/datasets/margin_trade_daily.md) |
 | fund_shares_history | 生成 | 基金份额历史 | [文档](docs/datasets/fund_shares_history.md) |
