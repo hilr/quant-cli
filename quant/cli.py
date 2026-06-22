@@ -13,7 +13,8 @@ from quant.convert import (convert_stock_quote, convert_margin_trade, convert_ad
                            convert_pbc_social_financing_stock, convert_pbc_credit_funds,
                            convert_pbc_central_bank_balance_sheet,
                            convert_gov_stat_trade, convert_gov_stat_retail_sales,
-                           convert_gov_stat_retail_monthly)
+                           convert_gov_stat_retail_monthly,
+                           convert_turnover_concentration)
 from quant.filter import (filter_volume_spike as run_filter_volume_spike,
                           filter_ma_converge as run_filter_ma_converge,
                           filter_by_tags as run_filter_by_tags,
@@ -341,6 +342,19 @@ def gov_stat_retail_monthly(
     console.print(f"[cyan]生成社会消费品零售总额每月新增额...[/cyan]")
     count = convert_gov_stat_retail_monthly(data_path=data_path, output_dir=output_dir)
     console.print(f"[green]完成! 共 {count} 条记录[/green]")
+
+
+@cli.command()
+def turnover_concentration(
+    data_path: str = "/mnt/readonly_dataset",
+    output_dir: str = "/mnt/dataset",
+    start_year: int = 2010,
+) -> None:
+    """全 A 股日成交额集中度（gini/alpha/top5-median/hhi/cr10），宽表，2010 起"""
+    console.print(f"[cyan]计算成交额集中度（{start_year} 起）...[/cyan]")
+    count = convert_turnover_concentration(
+        data_path=data_path, output_dir=output_dir, start_year=start_year)
+    console.print(f"[green]完成! 共 {count} 个交易日[/green]")
 
 
 @cli.command()
