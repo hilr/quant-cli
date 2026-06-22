@@ -1,8 +1,14 @@
 """行业成交额占比 river 图（streamgraph，时序）。
 
-每条带 = 一个中证二级行业的成交额占比，沿时间连续流动（weighted-wiggle 基线，
-band 居中、扭曲最小）。每个行业一种固定颜色（按一级行业色相分组、组内二级用亮度
-区分），同色 = 同行业，便于追踪单一行业的连贯演变。
+两种范围：
+1. 默认（不加 --parent）：全市场**一级行业**成交额占比，100% = 全市场
+2. 钻取（--parent <行业名>）：选定行业的**下一级**子行业成交额占比，
+   100% = 该父行业。--parent 自动识别父级（l1 或 l2）：
+   - 传一个一级行业名（如「工业」）→ 显示其二级子行业
+   - 传一个二级行业名（如「工程机械」）→ 显示其三级子行业
+
+x 轴只用交易日（跳过周末/节假日），sym 基线让河流总宽恒为 100%。
+颜色用黄金角分布色相，相邻色带差距最大。
 
 数据源：finance_sina/stock_quote（实时源）+ eastmoney/stock_quote（历史归档）fallback。
 """
@@ -13,11 +19,8 @@ import colorsys
 from datetime import date, timedelta
 from pathlib import Path
 
-import matplotlib.dates as mdates
 import matplotlib.pyplot as plt
-import numpy as np
 import polars as pl
-from matplotlib.patches import Rectangle
 
 from industry_common import (
     CJK_FONTS,
@@ -28,13 +31,9 @@ from industry_common import (
     load_quote,
 )
 
-L2_NAME_COL = 5
-L1_CODE_COL, L1_NAME_COL = 2, 3
-L2_CODE_COL = 4
 
-
-def load_industry_l2(data_path: Path) -> pl.DataFrame:
-    """最新行业分类表 → [code, l1_code, l1_name, l2_code, l2_name]。"""
+def load_industry_full(data_path: Path) -> pl.DataFrame:
+    """最新行业分类表 → [code, l1_code, l1_name, l2_code, l2_name, l3_code, l3_name]。"""
     ind_dir = data_path / INDUSTRY_DIR_NAME
     files = sorted(ind_dir.glob("*.xlsx"))
     if not files:
@@ -42,26 +41,63 @@ def load_industry_l2(data_path: Path) -> pl.DataFrame:
     rows = _read_sheet(files[-1])
     records = []
     for r in rows[1:]:
-        if len(r) <= L2_NAME_COL:
+        if len(r) < 4:
             continue
-        code, l1c, l1n, l2c, l2n = r[0], r[L1_CODE_COL], r[L1_NAME_COL], r[L2_CODE_COL], r[L2_NAME_COL]
-        if code and l1n and l2n:
-            records.append({
-                "code": str(code),
-                "l1_code": str(l1c), "l1_name": str(l1n),
-                "l2_code": str(l2c), "l2_name": str(l2n),
-            })
+        code = r[0]
+        if not code:
+            continue
+        rec: dict = {"code": str(code)}
+        for lvl in (1, 2, 3):
+            ccol, ncol = lvl * 2, 1 + lvl * 2
+            if len(r) > ncol and r[ccol] and r[ncol]:
+                rec[f"l{lvl}_code"] = str(r[ccol])
+                rec[f"l{lvl}_name"] = str(r[ncol])
+        records.append(rec)
     return pl.DataFrame(records)
 
 
-def fixed_l2_order(industry: pl.DataFrame) -> list[tuple]:
-    """按 (一级代码, 二级代码) int 升序的 distinct 二级行业顺序 → 一级分组连续。"""
-    pairs = (
-        industry.select(["l1_code", "l1_name", "l2_code", "l2_name"])
-        .unique()
-        .sort([(pl.col("l1_code").cast(pl.Int64)), (pl.col("l2_code").cast(pl.Int64))])
-    )
-    return list(pairs.iter_rows())
+def resolve_scope(
+    industry: pl.DataFrame, parent: str | None
+) -> tuple[str | None, str | None, str, str, list[tuple]]:
+    """确定钻取范围 → (filter_col, filter_val, target_name_col, scope_label, order)。
+
+    - parent=None：全市场 l1 视图
+    - parent 匹配 l1：钻取到 l2
+    - parent 匹配 l2：钻取到 l3
+    order = [(target_code, target_name)] 按代码 int 升序。
+    """
+    if parent is None:
+        sub = (industry.select(["l1_code", "l1_name"]).unique()
+               .sort(pl.col("l1_code").cast(pl.Int64)))
+        return (None, None, "l1_name", "全市场 · 一级行业",
+                list(sub.iter_rows()))
+
+    found_level = None
+    for lvl in (3, 2, 1):  # 优先深级（避免重名误判）
+        if (industry.filter(pl.col(f"l{lvl}_name") == parent)).height > 0:
+            found_level = lvl
+            break
+    if found_level is None:
+        all_names = sorted({
+            n for col in ("l1_name", "l2_name") for n in industry[col].to_list()
+            if n is not None
+        })
+        raise SystemExit(f"未找到行业「{parent}」。可选：\n  " + " / ".join(all_names))
+    if found_level == 3:
+        raise SystemExit(f"「{parent}」已是三级行业，无下一级可展开")
+
+    filter_col = f"l{found_level}_name"
+    target_lvl = found_level + 1
+    target_code_col = f"l{target_lvl}_code"
+    target_name_col = f"l{target_lvl}_name"
+    level_cn = {2: "二", 3: "三"}[target_lvl]
+    scope_label = f"{parent} · {level_cn}级子行业"
+
+    sub = (industry.filter(pl.col(filter_col) == parent)
+           .select([target_code_col, target_name_col]).unique()
+           .sort(pl.col(target_code_col).cast(pl.Int64)))
+    return (filter_col, parent, target_name_col, scope_label,
+            list(sub.iter_rows()))
 
 
 def _collect_full_dates(data_path: Path) -> list[str]:
@@ -93,63 +129,72 @@ def pick_recent_dates(data_path: Path, days: int) -> list[str]:
     return recent or full[-1:]
 
 
-def aggregate(industry: pl.DataFrame, data_path: Path, dates: list[str]) -> pl.DataFrame:
-    """逐日按二级行业聚合 → 长表 [date, l2_name, pct, wchg]。"""
+def aggregate(
+    industry: pl.DataFrame,
+    data_path: Path,
+    dates: list[str],
+    filter_col: str | None,
+    filter_val: str | None,
+    target_name_col: str,
+) -> pl.DataFrame:
+    """逐日按目标行业聚合 → 长表 [date, target_name, pct]。
+
+    filter_col 非空时：仅聚合该父行业的股票，分母 = 该父行业当日成交额；
+    否则：聚合全市场，分母 = 全市场当日成交额。
+    """
     records = []
     for dt in dates:
         q = load_quote(data_path, dt)
         df = q.join(industry, on="code", how="inner")
+        if filter_col is not None:
+            df = df.filter(pl.col(filter_col) == filter_val)
         day_total = df["turnover"].sum()
         if day_total <= 0:
             continue
         records.append(
-            df.group_by("l2_name").agg([
+            df.group_by(target_name_col).agg([
                 pl.col("turnover").sum().alias("turnover"),
             ])
             .with_columns([
                 pl.lit(dt).alias("date"),
                 (pl.col("turnover") / day_total * 100.0).alias("pct"),
             ])
-            .select(["date", "l2_name", "pct"])
+            .rename({target_name_col: "target_name"})
+            .select(["date", "target_name", "pct"])
         )
     return pl.concat(records)
 
 
-def _l2_palette(l2_order: list[tuple]) -> list[tuple]:
-    """按一级行业分组配色：每组一个色相，组内二级用亮度区分。返回每个 l2 的 RGB。"""
-    groups: list[tuple[str, list[str]]] = []
-    cur = None
-    for l1c, l1n, l2c, l2n in l2_order:
-        if l1n != cur:
-            groups.append((l1n, []))
-            cur = l1n
-        groups[-1][1].append(l2n)
-    n_groups = len(groups)
-    palette: dict[str, tuple] = {}
-    for g, (l1n, members) in enumerate(groups):
-        m_total = len(members)
-        for m, l2n in enumerate(members):
-            h = (g / n_groups) % 1.0
-            light = 0.50 + (0.20 * (m / (m_total - 1)) if m_total > 1 else 0.0)
-            palette[l2n] = colorsys.hls_to_rgb(h, light, 0.60)
-    return [palette[p[3]] for p in l2_order]
+def _palette(order: list[tuple]) -> list[tuple]:
+    """黄金角分布色相，相邻色带色相差距最大。"""
+    out = []
+    for i, _p in enumerate(order):
+        h = (i * 0.618033988749895) % 1.0
+        light = 0.60 if (i % 2 == 0) else 0.40
+        out.append(colorsys.hls_to_rgb(h, light, 0.70))
+    return out
 
 
 def render(
-    long: pl.DataFrame, l2_order: list[tuple], dates: list[str], output: Path
+    long: pl.DataFrame,
+    order: list[tuple],
+    dates: list[str],
+    scope_label: str,
+    output: Path,
 ) -> None:
     plt.rcParams["font.sans-serif"] = CJK_FONTS
     plt.rcParams["axes.unicode_minus"] = False
 
-    l2_names = [p[3] for p in l2_order]
+    names = [p[1] for p in order]
     date_objs = [date.fromisoformat(d) for d in dates]
-    x = mdates.date2num(date_objs)
+    n_dates = len(date_objs)
+    x = list(range(n_dates))
 
-    pct_wide = long.pivot("l2_name", index="date", values="pct").sort("date")
+    pct_wide = long.pivot("target_name", index="date", values="pct").sort("date")
 
     def _select(df, fill):
         cols = []
-        for name in l2_names:
+        for name in names:
             if name in df.columns:
                 cols.append(pl.col(name))
             else:
@@ -159,83 +204,110 @@ def render(
     pct_arr = _select(pct_wide, 0.0).fill_null(0.0).to_numpy()
     if pct_arr.ndim == 1:
         pct_arr = pct_arr.reshape(1, -1)
-    Y = pct_arr.T  # (n_l2, n_dates)：stackplot 每行一个行业
+    Y = pct_arr.T
 
-    colors = _l2_palette(l2_order)
+    colors = _palette(order)
 
     fig = plt.figure(figsize=(20, 10), dpi=120)
     fig.patch.set_facecolor("white")
-    ax = fig.add_axes([0.05, 0.10, 0.60, 0.74])
+    ax = fig.add_axes([0.05, 0.08, 0.78, 0.84])
     ax.set_facecolor("white")
-    ax.stackplot(x, *Y, baseline="weighted_wiggle", colors=colors,
-                 edgecolor="white", linewidth=0.3)
+    ax.stackplot(x, *Y, baseline="sym", colors=colors,
+                 edgecolor="none", linewidth=0)
 
-    ax.set_xlim(x[0], x[-1])
-    ax.xaxis.set_major_locator(mdates.DayLocator(interval=2))
-    ax.xaxis.set_major_formatter(mdates.DateFormatter("%m-%d"))
-    plt.setp(ax.get_xticklabels(), rotation=45, ha="right", fontsize=9)
-    ax.set_yticks([])  # weighted_wiggle 基线下 y 绝对值无意义
+    ax.set_xlim(0, n_dates - 1)
+    ax.set_ylim(-50, 50)
+    ax.margins(y=0)
+
+    tick_step = 4
+    tick_idx = list(range(0, n_dates, tick_step))
+    labels = []
+    prev_year = None
+    for i in tick_idx:
+        d = date_objs[i]
+        if d.year != prev_year:
+            labels.append(d.strftime("%Y-%m-%d"))
+            prev_year = d.year
+        else:
+            labels.append(d.strftime("%m-%d"))
+    ax.set_xticks(tick_idx)
+    ax.set_xticklabels(labels)
+    plt.setp(ax.get_xticklabels(), rotation=90, ha="center", va="top", fontsize=6)
+    ax.tick_params(axis="x", pad=2, length=2)
+    ax.set_yticks([-50, -25, 0, 25, 50])
+    ax.set_yticklabels(["", "75%", "50%\n(中线)", "75%", ""])
+    ax.yaxis.set_tick_params(labelsize=8, length=0, colors="#888")
+    ax.grid(axis="y", color="#eee", lw=0.5, zorder=0)
     for sp in ("left", "top", "right"):
         ax.spines[sp].set_visible(False)
+
+    # 行业名标在最后一天该 band 的中心 y 位置（右侧 y 轴旁）
+    last_pct = Y[:, -1]
+    cum = 0.0
+    for i, name in enumerate(names):
+        band_h = float(last_pct[i])
+        center_y = -50 + cum + band_h / 2
+        cum += band_h
+        ax.annotate(
+            name,
+            xy=(n_dates - 1, center_y),
+            xytext=(8, 0), textcoords="offset points",
+            ha="left", va="center",
+            fontsize=8.5, color="#222", fontweight="bold",
+            annotation_clip=False,
+        )
 
     n = len(date_objs)
     start, end = dates[0], dates[-1]
     fig.text(
-        0.35, 0.965,
-        f"行业成交额占比 river 图 · {start} ~ {end}（{n} 个交易日）\n"
-        f"每条带 = 一个中证二级行业的成交额占比（streamgraph 基线）；同色 = 同行业，按一级行业色相分组",
+        0.44, 0.965,
+        f"{scope_label} · 成交额占比 river 图 · {start} ~ {end}（{n} 个交易日）\n"
+        f"sym 基线：整体恒为 100%，对称居中；每条带 = 一个行业的成交额占比",
         ha="center", va="top", fontsize=12.5,
     )
-
-    # 右侧图例：每个 l2 带色块，按一级分组，自上而下 = 河流自上而下
-    ax_lg = fig.add_axes([0.685, 0.06, 0.30, 0.82])
-    ax_lg.axis("off")
-    ax_lg.set_xlim(0, 1)
-    ax_lg.set_ylim(0, 1)
-    ax_lg.text(0.0, 0.99, "行业（自上而下）", fontsize=9.5, fontweight="bold", va="top")
-    y = 0.965
-    prev_l1 = None
-    for l1c, l1n, l2c, l2n in reversed(l2_order):
-        if l1n != prev_l1:
-            ax_lg.text(0.0, y, l1n, fontsize=9, fontweight="bold", va="top", color="#222")
-            y -= 0.023
-            prev_l1 = l1n
-        c = colors[l2_names.index(l2n)]
-        ax_lg.add_patch(Rectangle((0.02, y - 0.004), 0.045, 0.013,
-                                  facecolor=c, edgecolor="none"))
-        ax_lg.text(0.075, y, l2n, fontsize=7.5, va="top", color="#444")
-        y -= 0.0175
 
     output.parent.mkdir(parents=True, exist_ok=True)
     fig.savefig(output, dpi=120, bbox_inches="tight", facecolor="white")
     plt.close(fig)
-    print(f"Saved: {output}  ({n} 日 × {len(l2_names)} 个二级行业)")
+    print(f"Saved: {output}  ({n} 日 × {len(names)} 个行业)")
 
 
 def main() -> None:
     parser = argparse.ArgumentParser(
-        description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter,
+        description=__doc__,
+        formatter_class=argparse.RawDescriptionHelpFormatter,
     )
     parser.add_argument("--days", type=int, default=30,
                         help="最近 N 个日历日内的完整交易日（默认 30）")
+    parser.add_argument("--parent", type=str, default=None,
+                        help="钻取模式：父行业名（一级行业 → 看二级；"
+                             "二级行业 → 看三级）；不填则展示全市场一级行业")
     parser.add_argument("--data-path", type=Path, default=Path("/mnt/readonly_dataset"),
                         help="只读原始数据根目录")
     parser.add_argument("--output", type=Path, default=None,
-                        help="输出 PNG 路径（默认 /mnt/dataset/industry_turnover_stack_{end}.png）")
+                        help="输出 PNG 路径")
     args = parser.parse_args()
 
-    industry = load_industry_l2(args.data_path)
-    l2_order = fixed_l2_order(industry)
-    print(f"行业表: {industry.height} 只股票, {len(l2_order)} 个二级行业（{len(set(p[1] for p in l2_order))} 个一级）")
+    industry = load_industry_full(args.data_path)
+    filter_col, filter_val, target_name_col, scope_label, order = resolve_scope(
+        industry, args.parent
+    )
+
+    print(f"范围: {scope_label}  行业数: {len(order)}")
+    print(f"股票数: {industry.height}")
 
     dates = pick_recent_dates(args.data_path, args.days)
     print(f"日期范围: {dates[0]} ~ {dates[-1]}（{len(dates)} 个交易日）")
 
-    long = aggregate(industry, args.data_path, dates)
-    print(f"聚合: {long.height} 条 (date × l2)")
+    long = aggregate(industry, args.data_path, dates,
+                     filter_col, filter_val, target_name_col)
+    print(f"聚合: {long.height} 条 (date × industry)")
 
-    output = args.output or Path(f"/mnt/dataset/industry_turnover_stack_{dates[-1]}.png")
-    render(long, l2_order, dates, output)
+    slug = f"sub_{args.parent}" if args.parent else "market"
+    output = args.output or Path(
+        f"/mnt/dataset/industry_turnover_stack_{slug}_{dates[-1]}.png"
+    )
+    render(long, order, dates, scope_label, output)
 
 
 if __name__ == "__main__":
