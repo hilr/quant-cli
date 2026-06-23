@@ -109,6 +109,38 @@ uv run python plots/industry_turnover_stack.py --days 60
 
 **行业表字段：** 证券代码, 证券简称, 中证一/二/三/四级行业分类代码与简称（8394 只股票，11 个一级、35 个二级、~90 个三级、~200 个四级）
 
+### turnover_spike_vs_index_top — 天量天价事件研究
+
+事件研究设计：检验「天量天价」是否成立——指数成交额异常放大（天量）能否**预测**指数顶部。找天量日，算此后 5/20/60 个交易日指数前向收益，与全部交易日基线对比，bootstrap 95% CI 估计差值。
+
+支持任意指数（`--code`，默认上证综指 000001；沪深300=000300、中证500=000905）。三种天量定义并行：A=250 日滚动新高；B=成交额/MA60 ≥ 2 倍；C=天量 re-test（成交额 ZigZag 高拐点中，后一个高点相对前一个偏离 ≤ 容忍度）。**注意：C 用 ZigZag 是回溯式算法，含未来函数，实证其显著负向预测力是 look-ahead bias 的伪信号（详见 [`research/turnover_spike_vs_index_top/README.md`](research/turnover_spike_vs_index_top/README.md)）**。冷却期（默认 60 日）去重，保证前向窗口不重叠。并用 ZigZag 标记指数阶段高点，量化「天量事件→后续阶段高点」间隔。
+
+```bash
+# 默认上证综指
+uv run python plots/turnover_spike_vs_index_top.py
+
+# 沪深300 / 中证500
+uv run python plots/turnover_spike_vs_index_top.py --code 000300
+uv run python plots/turnover_spike_vs_index_top.py --code 000905
+```
+
+| 参数 | 说明 | 默认 |
+|------|------|------|
+| `--index-dir` | 指数 parquet 父目录 | /mnt/dataset/index_quote_history |
+| `--code` | 指数代码 | 000001（上证综指） |
+| `--start-date` | 起始日期 | 2010-01-01 |
+| `--cooldown` | 事件间最小间隔（=最大 horizon 时前向窗口不重叠） | 60 |
+| `--roll-high` | 定义 A 滚动新高窗口 | 250 |
+| `--ma` / `--mult` | 定义 B 均线窗口 / 倍数阈值 | 60 / 2.0 |
+| `--horizons` | 前向收益窗口 | 5,20,60 |
+| `--zigzag` | ZigZag 价格阶段高/低点检测阈值 | 0.08（8%） |
+| `--zz-turnover` | 定义 C：成交额 ZigZag 反转阈值 | 0.30（30%） |
+| `--retol` | 定义 C：re-test 容忍度 | 0.20（20%） |
+| `--output` | 输出 PNG 路径 | /mnt/dataset/turnover_spike_vs_index_top_{code}.png |
+| `--csv-out` | 事件明细 CSV 路径 | /mnt/dataset/turnover_spike_events_{code}.csv |
+
+**数据源：** `/mnt/dataset/index_quote_history/{code}.parquet`。输出：PNG（成交额时序 + 天量事件标记 + ZigZag 阶段高点叠加 + 事件 vs 基线柱状图）+ CSV（每事件的前向收益、最大回撤、最大涨幅）+ 控制台「天量事件→后续阶段高点」间隔分析（与随机交易日基线对比）。
+
 ---
 
 ## Tag 层
