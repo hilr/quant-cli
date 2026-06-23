@@ -11,7 +11,7 @@ from quant.convert import (convert_stock_quote, convert_margin_trade, convert_ad
                            convert_pbc_money_supply, convert_pbc_overseas_rmb_assets,
                            convert_pbc_social_financing_flow,
                            convert_pbc_social_financing_stock, convert_pbc_credit_funds,
-                           convert_pbc_central_bank_balance_sheet,
+                           convert_pbc_central_bank_balance_sheet, convert_pbc_exchange_rate,
                            convert_gov_stat_trade, convert_gov_stat_retail_sales,
                            convert_gov_stat_retail_monthly,
                            convert_turnover_concentration)
@@ -261,6 +261,17 @@ def pbc_overseas_rmb_assets(
     """境外机构/个人持有境内人民币金融资产（股票/债券/贷款/存款），宽表，亿元，2014 起"""
     console.print(f"[cyan]生成境外机构人民币金融资产数据...[/cyan]")
     count = convert_pbc_overseas_rmb_assets(data_path=data_path, output_dir=output_dir)
+    console.print(f"[green]完成! 共 {count} 条月度记录[/green]")
+
+
+@cli.command()
+def pbc_exchange_rate(
+    data_path: str = "/mnt/readonly_dataset",
+    output_dir: str = "/mnt/dataset",
+) -> None:
+    """人民币兑美元汇率（期末/月均），宽表，人民币元/美元，1999 起"""
+    console.print(f"[cyan]生成人民币汇率数据...[/cyan]")
+    count = convert_pbc_exchange_rate(data_path=data_path, output_dir=output_dir)
     console.print(f"[green]完成! 共 {count} 条月度记录[/green]")
 
 
