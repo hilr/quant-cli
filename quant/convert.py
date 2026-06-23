@@ -1880,6 +1880,106 @@ def convert_pbc_overseas_rmb_assets(data_path: str, output_dir: str) -> int:
     return len(df)
 
 
+def convert_pbc_exchange_rate(data_path: str, output_dir: str) -> int:
+    """人民币兑美元汇率（月度），宽表 date,usd_cny_eop,usd_cny_avg（人民币元/美元）。
+    源：gov_pbc/{year}/[货币统计概览/]汇率报表[Exchange Rate].{htm,xls,xlsx}，1999 起。
+
+    两个序列（均来自「一美元折合人民币」= 1 美元兑 X 人民币元）：
+      usd_cny_eop  期末数 = 月末美元中间价
+      usd_cny_avg  平均数 = 月均美元中间价
+
+    每个文件是「项目×月份」宽表，月份在列。用列对齐法取数据行同列的值。
+      - 月份用首列真实年月（_pbc_parse_period_str 解析 'YYYY.01' 或 1999 的
+        '1999.12'）+ 列位置递增；不逐列解析字符串——.xls 会把 10 月表头
+        'YYYY.10' 存成浮点 YYYY.1 被误判为 Q1→3 月。
+    """
+    src_root = Path(data_path) / "gov_pbc"
+    out_path = Path(output_dir) / "pbc"
+    out_path.mkdir(parents=True, exist_ok=True)
+
+    # (列名, 关键词1, 关键词2)：标准化项目名需同时含两个关键词，避开英文翻译行
+    series = [
+        ("usd_cny_eop", "美元", "期末"),
+        ("usd_cny_avg", "美元", "平均"),
+    ]
+    grid: dict[str, dict[str, float]] = {}
+
+    for year in range(1999, 2027):
+        yd = src_root / str(year)
+        if not yd.is_dir():
+            continue
+        fp = _pbc_find_file(yd, ["货币统计概览"], ["汇率报表"])
+        if fp is None:
+            print(f"  跳过 {year}：找不到汇率报表")
+            continue
+        try:
+            rows = _pbc_read_sheet(fp)
+        except Exception as e:
+            print(f"  跳过 {year}：读取失败 {e}")
+            continue
+        header_idx = _pbc_find_header_row(rows)
+        if header_idx is None:
+            print(f"  跳过 {year}：找不到表头行")
+            continue
+        header = rows[header_idx]
+        # 月份列：用首列真实年月（_pbc_parse_period_str 解析首列 'YYYY.01' 或
+        # 1999 的 '1999.12'），后续按列位置递增。不逐列解析字符串——.xls 会把
+        # 10 月表头 'YYYY.10' 存成浮点 YYYY.1，被 _pbc_parse_period_str 误判为
+        # Q1→3 月。首列总是 01 月（或 1999 的 12 月），不受此截断影响。
+        raw_idxs: list[int] = []
+        start_pm = None
+        for ci, cell in enumerate(header):
+            if _pbc_is_item_header_cell(cell):
+                continue
+            if not str(cell).strip():
+                continue
+            pm = _pbc_parse_period_str(cell)
+            if pm is None:
+                continue
+            if start_pm is None:
+                start_pm = pm
+            raw_idxs.append(ci)
+        if not raw_idxs or start_pm is None:
+            print(f"  跳过 {year}：未识别到月份列")
+            continue
+        base_year, start_month = start_pm
+        month_cols = [
+            (ci, f"{base_year:04d}-{start_month + off:02d}")
+            for off, ci in enumerate(raw_idxs)
+            if start_month + off <= 12
+        ]
+
+        n_year = 0
+        for r in rows[header_idx + 1:]:
+            if not r:
+                continue
+            name = _pbc_norm_item(r[0]) if r[0] else ""
+            if not name or _pbc_row_is_note(name):
+                continue
+            key = next((k for k, kw1, kw2 in series if kw1 in name and kw2 in name), None)
+            if key is None:
+                continue
+            for ci, d in month_cols:
+                if ci >= len(r):
+                    continue
+                v = _pbc_to_float(r[ci])
+                if v is None:
+                    continue
+                grid.setdefault(d, {})[key] = v
+                n_year += 1
+        print(f"  {year}: {fp.name} → {n_year} 个值")
+
+    dates = sorted(grid)
+    df = pl.DataFrame({
+        "date": dates,
+        "usd_cny_eop": [grid[d].get("usd_cny_eop") for d in dates],
+        "usd_cny_avg": [grid[d].get("usd_cny_avg") for d in dates],
+    })
+    df.write_csv(out_path / "exchange_rate.csv")
+    print(f"Saved exchange_rate: {len(df)} rows to {out_path}")
+    return len(df)
+
+
 def convert_pbc_social_financing_flow(data_path: str, output_dir: str) -> int:
     """社会融资规模增量（流量），长表 date/item/value（亿元）。
     源：gov_pbc/{year}/社会融资规模/[社会融资规模增量统计表|社会融资规模统计表]

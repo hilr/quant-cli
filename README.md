@@ -41,6 +41,7 @@
 | pbc/credit_funds | 生成 | 金融机构信贷收支（存贷款全明细），长表 | [文档](docs/datasets/pbc_credit_funds.md) |
 | pbc/central_bank_balance_sheet | 生成 | 货币当局资产负债表（全明细），长表 | [文档](docs/datasets/pbc_central_bank_balance_sheet.md) |
 | pbc/overseas_rmb_assets | 生成 | 境外机构/个人持有境内人民币金融资产（股票/债券/贷款/存款），宽表 | [文档](docs/datasets/pbc_overseas_rmb_assets.md) |
+| pbc/exchange_rate | 生成 | 人民币兑美元汇率（月末/月均中间价），宽表 | [文档](docs/datasets/pbc_exchange_rate.md) |
 | gov_stat/trade | 生成 | 海关进出口月度指标（长表） | [文档](docs/datasets/gov_stat_trade.md) |
 | gov_stat/retail_sales | 生成 | 社会消费品零售总额月度指标（长表） | [文档](docs/datasets/gov_stat_retail_sales.md) |
 | gov_stat/retail_sales_monthly | 生成 | 社会消费品零售总额每月新增额（宽表，累计值差分） | [文档](docs/datasets/gov_stat_retail_sales_monthly.md) |
@@ -469,6 +470,7 @@ uv run python plots/channel_entry_signals.py --code 512890 --window 120 --k 1.5 
 │        credit_funds          (信贷收支，本外币+人民币，1999+)    │
 │        central_bank_balance_sheet (央行资产负债表，1999+)       │
 │        overseas_rmb_assets  (境外持境内金融资产，2014+)         │
+│        exchange_rate       (人民币兑美元汇率，1999+)            │
 └─────────────────────────────────────────────────────────────────┘
 
 ┌─────────────────────────────────────────────────────────────────┐
