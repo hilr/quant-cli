@@ -14,7 +14,8 @@ from quant.convert import (convert_stock_quote, convert_margin_trade, convert_ad
                            convert_pbc_central_bank_balance_sheet, convert_pbc_exchange_rate,
                            convert_gov_stat_trade, convert_gov_stat_retail_sales,
                            convert_gov_stat_retail_monthly,
-                           convert_turnover_concentration)
+                           convert_turnover_concentration,
+                           convert_exchange_hkex_southbound_flow)
 from quant.filter import (filter_volume_spike as run_filter_volume_spike,
                           filter_ma_converge as run_filter_ma_converge,
                           filter_by_tags as run_filter_by_tags,
@@ -273,6 +274,18 @@ def pbc_exchange_rate(
     console.print(f"[cyan]生成人民币汇率数据...[/cyan]")
     count = convert_pbc_exchange_rate(data_path=data_path, output_dir=output_dir)
     console.print(f"[green]完成! 共 {count} 条月度记录[/green]")
+
+
+@cli.command()
+def exchange_hkex_southbound_flow(
+    data_path: str = "/mnt/readonly_dataset",
+    output_dir: str = "/mnt/dataset",
+) -> None:
+    """港股通（南向）每日买卖净额，宽表，亿港元，2021-06 起"""
+    console.print(f"[cyan]生成港股通南向资金数据...[/cyan]")
+    count = convert_exchange_hkex_southbound_flow(
+        data_path=data_path, output_dir=output_dir)
+    console.print(f"[green]完成! 共 {count} 条日度记录[/green]")
 
 
 @cli.command()

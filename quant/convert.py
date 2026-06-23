@@ -2,6 +2,7 @@
 import csv
 import re
 import zipfile
+from datetime import date
 from html.parser import HTMLParser
 from xml.etree import ElementTree as ET
 
@@ -2455,3 +2456,157 @@ def convert_turnover_concentration(
     out_df.write_csv(out_path / "turnover_concentration.csv")
     print(f"Saved turnover_concentration: {len(out_df)} rows to {out_path}")
     return len(out_df)
+
+
+# ============== exchange_hkex/southbound_flow ==============
+
+def convert_exchange_hkex_southbound_flow(data_path: str, output_dir: str) -> int:
+    """港股通（南向）每日买卖净额，宽表 date,sse_buy_yi,sse_sell_yi,szse_buy_yi,
+    szse_sell_yi,buy_yi,sell_yi,net_yi（单位：亿港元）。
+
+    两个数据源拼接：
+      1. exchange_hkex/hk_connect_total.csv —— 长表 date,code,buy,sell，
+         **已直接为亿港元**。覆盖 2015-08-10 ~ 2023-03-24。用于 connect_top
+         启动前的早期数据（< 2021-06-15）。同日 SSE Southbound buy 与 connect_top
+         实测一致（如 2021-06-24：hk=80.87，connect_top=8086.67÷100=80.87）。
+      2. exchange_hkex/connect_top/{YYYY-MM-DD}.csv —— 每日一文件，含 SSE/SZSE
+         × North/South 四行聚合（"南下资金统计"）+ 各方向 top10 个股明细。
+         **聚合行单位为百万港元**，输出 ÷100 换算到亿。用于 2021-06-15+。
+
+    单位推断（connect_top 聚合 = 百万港元）：2024-06-14 实测 SSE Southbound
+    聚合 buy=12848.62，对应 top10 个股 buy 合计 ≈ 4412 百万港元（44.12 亿），
+    聚合是个股的 ~2.9 倍，符合"汇总 > top10"预期；若单位为万元则聚合反小于
+    top10，不成立。
+
+    net_yi > 0 = 南向净流入（内地净买入港股）。
+
+    Schema（connect_top 跨年变化，按列名读取不依赖顺序）：
+      - 2021-2022 多数: date,code,name,buy,sell
+      - 2022 部分（如 2022-06-15）: code,buy,sell,name（无 date 列）
+      - 2023+: date,code,证券简称,buy,sell
+    date 一律取自文件名（YYYY-MM-DD），不读列。
+
+    空值与 sentinel：南向停盘日（HK 假期、半日市等）buy/sell 为空字符串，输出
+    null；北向 2025+ 出现 999999999 sentinel（≥9.9e8 一律置 null，南向目前
+    无此值但同样过滤以防后续变化）。
+    """
+    src_root = Path(data_path) / "exchange_hkex"
+    out_path = Path(output_dir) / "exchange_hkex"
+    out_path.mkdir(parents=True, exist_ok=True)
+
+    # 找 connect_top 实际最小日期（避免硬编码，用作 hk_connect_total 的截止边界）
+    ct_dir = src_root / "connect_top"
+    ct_dates: list[date] = []
+    if ct_dir.exists():
+        ct_dates = sorted(
+            date.fromisoformat(fp.stem)
+            for fp in ct_dir.glob("*.csv")
+        )
+    if not ct_dates:
+        raise RuntimeError("connect_top 目录为空")
+    ct_min = ct_dates[0]  # 实测 2021-06-15
+
+    records: dict[date, dict] = {}
+
+    # === Part 1: hk_connect_total.csv（早期，< ct_min）===
+    hk_path = src_root / "hk_connect_total.csv"
+    if hk_path.exists():
+        print(f"读取 {hk_path.name}（用于 {ct_min} 之前）...")
+        hk = (
+            pl.read_csv(hk_path)
+            .with_columns(pl.col("date").str.to_date("%Y-%m-%d").alias("d"))
+            .filter(
+                pl.col("code").is_in(["SSE Southbound", "SZSE Southbound"])
+                & (pl.col("d") < ct_min)
+            )
+        )
+        n = 0
+        for r in hk.iter_rows(named=True):
+            d = r["d"]
+            entry = records.setdefault(d, {
+                "date": d, "sse_buy_yi": None, "sse_sell_yi": None,
+                "szse_buy_yi": None, "szse_sell_yi": None,
+            })
+            b = r["buy"]
+            s = r["sell"]
+            # hk_connect_total 已是亿港元，无需 ÷100
+            if r["code"] == "SSE Southbound":
+                entry["sse_buy_yi"] = b
+                entry["sse_sell_yi"] = s
+            else:
+                entry["szse_buy_yi"] = b
+                entry["szse_sell_yi"] = s
+            n += 1
+        if records:
+            print(f"  hk_connect_total: {len(records)} 天 "
+                  f"({min(records)} ~ {max(records)})")
+
+    # === Part 2: connect_top/*.csv（ct_min 及之后）===
+    for fp in sorted(ct_dir.glob("*.csv")):
+        date_str = fp.stem
+        d_obj = date.fromisoformat(date_str)
+        if d_obj < ct_min:
+            continue
+        try:
+            df = pl.read_csv(fp)
+        except Exception as e:
+            print(f"  跳过 {date_str}：读取失败 {e}")
+            continue
+
+        if not all(c in df.columns for c in ("code", "buy", "sell")):
+            print(f"  跳过 {date_str}：缺少 code/buy/sell 列")
+            continue
+
+        # 强制数值化（空字符串 → null；999999999 sentinel → null）
+        df = df.with_columns(
+            pl.col("buy").cast(pl.Float64, strict=False),
+            pl.col("sell").cast(pl.Float64, strict=False),
+        ).with_columns(
+            pl.when(pl.col("buy") >= 9.9e8).then(None).otherwise(pl.col("buy")).alias("buy"),
+            pl.when(pl.col("sell") >= 9.9e8).then(None).otherwise(pl.col("sell")).alias("sell"),
+        )
+
+        def _agg(channel: str) -> tuple[float | None, float | None]:
+            sub = df.filter(pl.col("code") == channel)
+            if sub.is_empty():
+                return None, None
+            b = sub["buy"][0]
+            s = sub["sell"][0]
+            # 百万 → 亿（÷100）
+            return (
+                b / 100 if b is not None else None,
+                s / 100 if s is not None else None,
+            )
+
+        sse_b, sse_s = _agg("SSE Southbound")
+        szse_b, szse_s = _agg("SZSE Southbound")
+        records[d_obj] = {
+            "date": d_obj,
+            "sse_buy_yi": sse_b,
+            "sse_sell_yi": sse_s,
+            "szse_buy_yi": szse_b,
+            "szse_sell_yi": szse_s,
+        }
+
+    if not records:
+        raise RuntimeError("未读取到任何数据")
+
+    df = (
+        pl.DataFrame(list(records.values()), schema_overrides={
+            "sse_buy_yi": pl.Float64, "sse_sell_yi": pl.Float64,
+            "szse_buy_yi": pl.Float64, "szse_sell_yi": pl.Float64,
+        })
+        .sort("date")
+        # sum_horizontal：null 自动当 0，避免早期 SZSE 未开通（null）导致 buy_yi/net_yi 整列 null
+        .with_columns(
+            pl.sum_horizontal("sse_buy_yi", "szse_buy_yi").alias("buy_yi"),
+            pl.sum_horizontal("sse_sell_yi", "szse_sell_yi").alias("sell_yi"),
+        )
+        .with_columns(
+            (pl.col("buy_yi") - pl.col("sell_yi")).alias("net_yi"),
+        )
+    )
+
+    df.write_csv(out_path / "southbound_flow.csv")
+    print(f"Saved southbound_flow: {len(df)} rows to {out_path}")
+    return len(df)
