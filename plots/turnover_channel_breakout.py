@@ -24,7 +24,6 @@
 from __future__ import annotations
 
 import argparse
-import bisect
 import sys
 from datetime import date
 from pathlib import Path
@@ -35,7 +34,7 @@ import numpy as np
 import polars as pl
 
 sys.path.insert(0, str(Path(__file__).parent))
-from turnover_spike_vs_index_top import zigzag_pivots
+from pivot_eval import find_nearest_pivot, zigzag_pivots
 
 INDEX_CODE = "000300"
 
@@ -52,7 +51,11 @@ def load_index(index_dir: Path, code: str) -> pl.DataFrame:
 
 
 def build_channel(df: pl.DataFrame, window: int, k: float) -> pl.DataFrame:
-    """log 空间 Bollinger 通道。rolling_std 用 ddof=1（Polars 默认）。"""
+    """log 空间 Bollinger 通道（乘法通道）。rolling_std 用 ddof=1（Polars 默认）。
+
+    成交额跨 50 倍，线性 Bollinger 会被近年大值主导；log 空间算 Bollinger，
+    exp 还原后是乘法通道，在 log y 轴上是平行带。
+    """
     log_to_expr = pl.col("turnover").log()
     return (
         df.with_columns(
@@ -80,25 +83,6 @@ def find_reentries(flags_outside: list[bool]) -> list[int]:
         if flags_outside[i - 1] and not flags_outside[i]:
             events.append(i)
     return events
-
-
-def find_nearest_pivot(idx: int, pivot_idxs: list[int],
-                       max_look: int) -> tuple[int, int] | None:
-    """找离 idx 绝对距离最近（≤ max_look）的 pivot 位置。
-    返回 (pivot_idx, signed_gap)，gap>0 = pivot 在未来，<0 = 在过去。None = 半径内无 pivot。"""
-    if not pivot_idxs:
-        return None
-    j = bisect.bisect_left(pivot_idxs, idx)
-    candidates: list[tuple[int, int]] = []
-    if j < len(pivot_idxs):
-        candidates.append((pivot_idxs[j], pivot_idxs[j] - idx))
-    if j > 0:
-        candidates.append((pivot_idxs[j - 1], pivot_idxs[j - 1] - idx))
-    candidates.sort(key=lambda x: abs(x[1]))
-    pivot_idx, gap = candidates[0]
-    if abs(gap) > max_look:
-        return None
-    return pivot_idx, gap
 
 
 def evaluate_vs_pivots(
