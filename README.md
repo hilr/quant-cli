@@ -133,13 +133,15 @@ uv run python plots/turnover_spike_vs_index_top.py --code 000905
 | `--roll-high` | 定义 A 滚动新高窗口 | 250 |
 | `--ma` / `--mult` | 定义 B 均线窗口 / 倍数阈值 | 60 / 2.0 |
 | `--horizons` | 前向收益窗口 | 5,20,60 |
+| `--window` | 成交额通道 MA 窗口（log Bollinger） | 120 |
+| `--k` | 通道宽度（log 空间 σ 倍数） | 2.0 |
 | `--zigzag` | ZigZag 价格阶段高/低点检测阈值 | 0.08（8%） |
 | `--zz-turnover` | 定义 C：成交额 ZigZag 反转阈值 | 0.30（30%） |
 | `--retol` | 定义 C：re-test 容忍度 | 0.20（20%） |
 | `--output` | 输出 PNG 路径 | /mnt/dataset/turnover_spike_vs_index_top_{code}.png |
 | `--csv-out` | 事件明细 CSV 路径 | /mnt/dataset/turnover_spike_events_{code}.csv |
 
-**数据源：** `/mnt/dataset/index_quote_history/{code}.parquet`。输出：PNG（成交额时序 + 天量事件标记 + ZigZag 阶段高点叠加 + 事件 vs 基线柱状图）+ CSV（每事件的前向收益、最大回撤、最大涨幅）+ 控制台「天量事件→后续阶段高点」间隔分析（与随机交易日基线对比）。
+**数据源：** `/mnt/dataset/index_quote_history/{code}.parquet`。输出：双面板 PNG（上=价格+ZigZag枢轴+事件竖线，下=成交额（log）+通道+事件标记）+ CSV（每事件的前向收益、最大回撤、最大涨幅）+ 控制台事件研究汇总表（5/20/60 日前向收益 vs 基线，bootstrap CI）+「天量事件→后续阶段高点」间隔分析（与随机交易日基线对比）。
 
 ---
 

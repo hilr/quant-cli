@@ -57,6 +57,24 @@ def build_signals(df: pl.DataFrame, roll_high: int, ma: int, mult: float) -> pl.
     ).drop("_ma")
 
 
+def build_channel(df: pl.DataFrame, window: int, k: float) -> pl.DataFrame:
+    """log 空间 Bollinger 通道（同 turnover_channel_breakout.py）。
+    乘法通道：exp(MA ± k·σ)，log 空间计算避免早期低位被近年大值主导。"""
+    log_t = pl.col("turnover").log()
+    return (
+        df.with_columns(
+            log_t.rolling_mean(window_size=window, min_samples=window).alias("_log_ma"),
+            log_t.rolling_std(window_size=window, min_samples=window).alias("_log_std"),
+        )
+        .with_columns(
+            pl.col("_log_ma").exp().alias("channel_mid"),
+            (pl.col("_log_ma") + k * pl.col("_log_std")).exp().alias("channel_upper"),
+            (pl.col("_log_ma") - k * pl.col("_log_std")).exp().alias("channel_lower"),
+        )
+        .drop(["_log_ma", "_log_std"])
+    )
+
+
 def zigzag_pivots(highs: list, lows: list, pct: float) -> list[tuple[int, float, str]]:
     """回溯式 ZigZag 枢轴点。返回 [(idx, price, 'H'|'L'), ...]。
 
@@ -276,10 +294,6 @@ def plot_figure(
     events_A: list[int],
     events_B: list[int],
     events_C: list[int],
-    summary_A: dict,
-    summary_B: dict,
-    summary_C: dict,
-    horizons: list[int],
     output: Path,
     start_date: date,
     def_descs: dict,
@@ -288,6 +302,8 @@ def plot_figure(
     zz_to_highs: list[tuple[int, float]],
     zz_turnover_pct: float,
     index_name: str,
+    window: int,
+    k: float,
 ) -> None:
     plt.rcParams["font.sans-serif"] = ["Noto Sans SC", "WenQuanYi Zen Hei"]
     plt.rcParams["axes.unicode_minus"] = False
@@ -295,6 +311,82 @@ def plot_figure(
     dates = df["date"].to_list()
     turnovers = df["turnover"].to_list()
     closes = df["close"].to_list()
+    upper = [v if v is not None else float("nan") for v in df["channel_upper"].to_list()]
+    lower = [v if v is not None else float("nan") for v in df["channel_lower"].to_list()]
+    mid = [v if v is not None else float("nan") for v in df["channel_mid"].to_list()]
+
+    fig, (ax_top, ax_bot) = plt.subplots(
+        2, 1, figsize=(15, 9), sharex=True,
+        gridspec_kw={"height_ratios": [1.2, 1.0]},
+        constrained_layout=True,
+    )
+
+    # === 上面板：价格 + ZigZag 枢轴 + 天量事件竖线（虚线，跨面板）===
+    ax_top.plot(dates, closes, color="#444", lw=0.7, label=f"{index_name}收盘")
+    if zz_pivots:
+        pv_h_idx = [p[0] for p in zz_pivots if p[2] == "H"]
+        pv_l_idx = [p[0] for p in zz_pivots if p[2] == "L"]
+        for i in pv_h_idx:
+            ax_top.vlines(dates[i], closes[i], closes[i] * 1.015,
+                          color="#d62728", lw=0.9, alpha=0.75, zorder=4)
+        if pv_h_idx:
+            ax_top.scatter([dates[i] for i in pv_h_idx],
+                           [closes[i] * 1.015 for i in pv_h_idx],
+                           marker="D", color="black", s=42, zorder=6,
+                           edgecolors="#d62728", linewidths=0.9,
+                           label=f"阶段高点 H（{len(pv_h_idx)}）")
+        for i in pv_l_idx:
+            ax_top.vlines(dates[i], closes[i] * 0.985, closes[i],
+                          color="#2ca02c", lw=0.9, alpha=0.75, zorder=4)
+        if pv_l_idx:
+            ax_top.scatter([dates[i] for i in pv_l_idx],
+                           [closes[i] * 0.985 for i in pv_l_idx],
+                           marker="D", color="black", s=30, zorder=6,
+                           edgecolors="#2ca02c", linewidths=0.9,
+                           label=f"阶段低点 L（{len(pv_l_idx)}）")
+    for i in events_A:
+        ax_top.axvline(dates[i], color="#d62728", lw=0.6, alpha=0.6,
+                       linestyle="--", zorder=2)
+    for i in events_B:
+        ax_top.axvline(dates[i], color="#ff7f0e", lw=0.6, alpha=0.6,
+                       linestyle="--", zorder=2)
+    for i in events_C:
+        ax_top.axvline(dates[i], color="#17becf", lw=0.6, alpha=0.6,
+                       linestyle="--", zorder=2)
+    ax_top.set_ylabel(f"{index_name}收盘", fontsize=10)
+    ax_top.grid(True, alpha=0.3)
+    ax_top.legend(loc="upper left", fontsize=8, ncol=3)
+    ax_top.set_title(
+        f"天量天价事件研究（{index_name}）· {start_date} ~ {dates[-1]}\n"
+        f"A={def_descs['A']}（{len(events_A)}）｜B={def_descs['B']}（{len(events_B)}）｜"
+        f"C={def_descs['C']}（{len(events_C)}，含未来函数）",
+        fontsize=11, fontweight="bold", loc="left",
+    )
+
+    # === 下面板：成交额（log）+ 通道 + 天量事件标记 + 跨面板竖线 ===
+    ax_bot.fill_between(dates, lower, upper, color="#1f77b4", alpha=0.13,
+                        label=f"通道 MA{window}±{k}σ（log）")
+    ax_bot.plot(dates, upper, "-", color="#1f77b4", lw=0.5, alpha=0.55)
+    ax_bot.plot(dates, lower, "-", color="#1f77b4", lw=0.5, alpha=0.55)
+    ax_bot.plot(dates, mid, "--", color="#1f77b4", lw=0.4, alpha=0.5)
+    ax_bot.plot(dates, turnovers, color="#1f77b4", lw=0.7, label=f"{index_name}成交额")
+    ax_bot.set_yscale("log")
+    ax_bot.set_ylabel("成交额（元，log）", fontsize=10)
+
+    # 成交额 ZigZag 高拐点（C 的「前一个高点」参考线，小横杠）
+    if zz_to_highs:
+        to_h_idx = sorted({p[0] for p in zz_to_highs if 0 <= p[0] < len(dates)})
+        if to_h_idx:
+            ax_bot.scatter([dates[i] for i in to_h_idx], [turnovers[i] for i in to_h_idx],
+                           marker="_", color="#17becf", s=70, zorder=4, alpha=0.55,
+                           label=f"成交额ZigZag高拐点（{zz_turnover_pct:.0%}，{len(to_h_idx)}）")
+
+    def scatter(positions, marker, color, label, size=70, edge="white"):
+        if not positions:
+            return
+        ax_bot.scatter([dates[p] for p in positions], [turnovers[p] for p in positions],
+                       marker=marker, color=color, s=size, zorder=7, alpha=0.9,
+                       edgecolors=edge, linewidths=0.7, label=label)
 
     set_A, set_B, set_C = set(events_A), set(events_B), set(events_C)
     all_three = set_A & set_B & set_C
@@ -305,117 +397,36 @@ def plot_figure(
     only_B = set_B - set_A - set_C
     only_C = set_C - set_A - set_B
 
-    fig = plt.figure(figsize=(15, 10))
-    gs = fig.add_gridspec(2, 1, height_ratios=[1.3, 1], hspace=0.32)
-    ax_top = fig.add_subplot(gs[0])
-
-    ax_top.plot(dates, turnovers, color="#1f77b4", lw=0.6, label=f"{index_name}成交额")
-    ax_top.set_yscale("log")
-    ax_top.set_ylabel("成交额（元，log）", color="#1f77b4", fontsize=9)
-    ax_top.tick_params(axis="y", labelcolor="#1f77b4")
-
-    ax_r = ax_top.twinx()
-    ax_r.plot(dates, closes, color="#888", lw=0.5, alpha=0.6, label=f"{index_name}收盘")
-    ax_r.set_ylabel(f"{index_name}收盘", color="#888", fontsize=9)
-    ax_r.tick_params(axis="y", labelcolor="#888")
-
-    if zz_pivots:
-        pv_dates = [dates[p[0]] for p in zz_pivots]
-        pv_prices = [p[1] for p in zz_pivots]
-        ax_r.plot(pv_dates, pv_prices, "-", color="#2ca02c", lw=1.0, alpha=0.75,
-                  zorder=4, label=f"ZigZag 枢轴（{zigzag_pct:.0%}）")
-        h_idx = [p[0] for p in zz_pivots if p[2] == "H"]
-        if h_idx:
-            ax_r.scatter([dates[i] for i in h_idx], [closes[i] for i in h_idx],
-                         marker="D", color="black", s=42, zorder=6,
-                         edgecolors="#2ca02c", linewidths=0.8,
-                         label=f"{index_name}阶段高点（{len(h_idx)}）")
-
-    def scatter(positions, marker, color, label, size=50, edge="white"):
-        if not positions:
-            return
-        kwargs = dict(marker=marker, color=color, s=size, zorder=5, linewidths=0.4,
-                      label=label)
-        if edge is not None:
-            kwargs["edgecolors"] = edge
-        ax_top.scatter(
-            [dates[p] for p in positions], [turnovers[p] for p in positions],
-            **kwargs,
-        )
-
-    # 成交额 zigzag 高拐点：C 的「前一个高点」参考线（小横杠，叠在成交额曲线上）
-    if zz_to_highs:
-        to_h_idx = [p[0] for p in zz_to_highs if 0 <= p[0] < len(dates)]
-        scatter(sorted(set(to_h_idx)), "_", "#17becf",
-                f"成交额ZigZag高拐点（阈值{zz_turnover_pct:.0%}，{len(to_h_idx)}）",
-                size=90, edge=None)
-
     scatter(sorted(only_A), "v", "#d62728", f"仅A（{len(only_A)}）")
     scatter(sorted(only_B), "^", "#ff7f0e", f"仅B（{len(only_B)}）")
     scatter(sorted(only_C), "s", "#17becf", f"仅C（{len(only_C)}）")
-    scatter(sorted(ab_only), "*", "#9467bd", f"A∩B（{len(ab_only)}）")
+    scatter(sorted(ab_only), "*", "#9467bd", f"A∩B（{len(ab_only)}）", size=90)
     scatter(sorted(ac_only), "P", "#e377c2", f"A∩C（{len(ac_only)}）")
     scatter(sorted(bc_only), "X", "#8c564b", f"B∩C（{len(bc_only)}）")
-    scatter(sorted(all_three), "*", "black", f"A∩B∩C（{len(all_three)}）", size=80)
+    scatter(sorted(all_three), "*", "black", f"A∩B∩C（{len(all_three)}）", size=110)
 
-    ax_top.set_xlim(dates[0], dates[-1])
-    ax_top.set_title(
-        f"天量天价事件研究（{index_name}）· {start_date} ~ {dates[-1]}\n"
-        f"天量={index_name}成交额（A={def_descs['A']} B={def_descs['B']} C={def_descs['C']}）；"
-        f"黑◆=ZigZag {index_name}阶段高点（阈值 {zigzag_pct:.0%}，回溯式）",
-        fontsize=12, fontweight="bold",
+    for i in events_A:
+        ax_bot.axvline(dates[i], color="#d62728", lw=0.6, alpha=0.6,
+                       linestyle="--", zorder=2)
+    for i in events_B:
+        ax_bot.axvline(dates[i], color="#ff7f0e", lw=0.6, alpha=0.6,
+                       linestyle="--", zorder=2)
+    for i in events_C:
+        ax_bot.axvline(dates[i], color="#17becf", lw=0.6, alpha=0.6,
+                       linestyle="--", zorder=2)
+
+    ax_bot.set_xlim(dates[0], dates[-1])
+    ax_bot.set_title(
+        f"{index_name}成交额 + 通道 MA{window}±{k}σ（log）+ 天量事件",
+        fontsize=11, fontweight="bold", loc="left",
     )
-    ax_top.grid(True, alpha=0.3)
-    ax_top.xaxis.set_major_locator(mdates.YearLocator())
-    ax_top.xaxis.set_major_formatter(mdates.DateFormatter("%Y"))
-    h1, l1 = ax_top.get_legend_handles_labels()
-    h2, l2 = ax_r.get_legend_handles_labels()
-    ax_top.legend(h1 + h2, l1 + l2, loc="upper left", fontsize=8)
-
-    # 下面板：事件 vs 基线（A/B/C 各 事件+基线 = 6 根柱/horizon）
-    ax_bot = fig.add_subplot(gs[1])
-    x = np.arange(len(horizons))
-    width = 0.13
-    offsets = [-2.5, -1.5, -0.5, 0.5, 1.5, 2.5]
-    series = [
-        ("A 事件", summary_A, "mean", "#d62728", None, True),
-        ("A 基线", summary_A, "baseline_mean", "#d62728", "//", False),
-        ("B 事件", summary_B, "mean", "#ff7f0e", None, True),
-        ("B 基线", summary_B, "baseline_mean", "#ff7f0e", "//", False),
-        ("C 事件", summary_C, "mean", "#17becf", None, True),
-        ("C 基线", summary_C, "baseline_mean", "#17becf", "//", False),
-    ]
-    for j, (name, s, field, color, hatch, is_event) in enumerate(series):
-        vals = [(s[k][field] * 100) if s.get(k) else 0.0 for k in horizons]
-        ax_bot.bar(x + offsets[j] * width, vals, width, color=color,
-                   alpha=0.9 if is_event else 0.45, hatch=hatch, label=name, zorder=3)
-        if is_event:
-            ev = [(s[k]["mean"] * 100) if s.get(k) else 0.0 for k in horizons]
-            lo = [(s[k]["ci_lo"] * 100) if s.get(k) else 0.0 for k in horizons]
-            hi = [(s[k]["ci_hi"] * 100) if s.get(k) else 0.0 for k in horizons]
-            has_ci = [bool(s.get(k)) for k in horizons]
-            ax_bot.errorbar(
-                x + offsets[j] * width, ev,
-                yerr=[[e - l for e, l in zip(ev, lo)], [h - e for h, e in zip(hi, ev)]],
-                fmt="none", ecolor="black", capsize=2.5, lw=0.9, zorder=4)
-            for jj, k in enumerate(horizons):
-                if not has_ci[jj]:
-                    continue
-                d = s[k]
-                tag = "★" if (d["ci_hi"] < 0 or d["ci_lo"] > 0) else ""
-                ax_bot.text(x[jj] + offsets[j] * width, ev[jj], tag,
-                            ha="center", va="bottom", fontsize=10, fontweight="bold")
-
-    ax_bot.axhline(0, color="black", lw=0.6)
-    ax_bot.set_xticks(x)
-    ax_bot.set_xticklabels([f"{k}日" for k in horizons])
-    ax_bot.set_ylabel("前向收益 (%)")
-    ax_bot.set_title(f"{index_name}：事件 vs 基线均值（★=bootstrap CI 排除 0）", fontsize=10)
-    ax_bot.grid(True, alpha=0.3, axis="y")
-    ax_bot.legend(loc="best", fontsize=8, ncol=4)
+    ax_bot.grid(True, alpha=0.3)
+    ax_bot.legend(loc="upper left", fontsize=7, ncol=4)
+    ax_bot.xaxis.set_major_locator(mdates.YearLocator())
+    ax_bot.xaxis.set_major_formatter(mdates.DateFormatter("%Y"))
 
     output.parent.mkdir(parents=True, exist_ok=True)
-    fig.savefig(output, dpi=120, bbox_inches="tight", facecolor="white")
+    fig.savefig(output, dpi=200, bbox_inches="tight", facecolor="white")
     plt.close(fig)
     print(f"图已保存: {output}")
 
@@ -451,6 +462,8 @@ def main() -> None:
     p.add_argument("--ma", type=int, default=60, help="定义 B 均线窗口")
     p.add_argument("--mult", type=float, default=2.0, help="定义 B 倍数阈值")
     p.add_argument("--horizons", type=str, default="5,20,60")
+    p.add_argument("--window", type=int, default=120, help="成交额通道 MA 窗口")
+    p.add_argument("--k", type=float, default=2.0, help="通道宽度（log 空间 σ 倍数）")
     p.add_argument("--zigzag", type=float, default=0.08,
                    help="ZigZag 反转阈值（上证阶段高/低点检测，如 0.08=8%%）")
     p.add_argument("--zz-turnover", type=float, default=0.30,
@@ -472,6 +485,7 @@ def main() -> None:
 
     df_full = load_index(args.index_dir, args.code)
     df_full = build_signals(df_full, args.roll_high, args.ma, args.mult)
+    df_full = build_channel(df_full, args.window, args.k)
 
     df = df_full.filter(pl.col("date") >= start)
     n = df.height
@@ -568,9 +582,9 @@ def main() -> None:
     # 过滤后的成交额 zigzag 高拐点（供上面板标记 C 的「前一个高点」参考）
     zz_to_highs_plot = [(i - offset, v) for i, v in zz_to_highs_full if i - offset >= 0]
     plot_figure(df, events_A, events_B, events_C,
-                summary_A, summary_B, summary_C, horizons, output, start,
+                output, start,
                 def_descs, zz_pivots, args.zigzag, zz_to_highs_plot, args.zz_turnover,
-                index_name)
+                index_name, args.window, args.k)
 
     csv_out = args.csv_out or Path(f"/mnt/dataset/turnover_spike_events_{args.code}.csv")
     write_csv(rows_A + rows_B + rows_C, csv_out, horizons)

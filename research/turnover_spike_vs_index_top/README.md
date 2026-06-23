@@ -91,4 +91,8 @@ uv run python plots/turnover_spike_vs_index_top.py --code 000300
 uv run python plots/turnover_spike_vs_index_top.py --code 000905
 ```
 
-输出 PNG + 事件明细 CSV 到 `/mnt/dataset/`，控制台打印事件研究汇总表 + ZigZag 时间间隔分析。
+输出 PNG + 事件明细 CSV 到 `/mnt/dataset/`，控制台打印事件研究汇总表（5/20/60 日前向收益 vs 基线，bootstrap CI）+ ZigZag 时间间隔分析。
+
+PNG 为双面板布局（与 `turnover_channel_breakout.py` 一致）：
+- **上图**：指数价格 + ZigZag H/L 枢轴（◆ 偏移 + 短竖线）+ 天量事件竖线（A 红 / B 橙 / C 青，虚线跨面板）
+- **下图**：成交额（log）+ MA±kσ 通道（log Bollinger）+ 成交额 ZigZag 高拐点（小横杠）+ 天量事件标记（按 A/B/C 组合 7-set 配色）
