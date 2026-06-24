@@ -1,4 +1,4 @@
-"""ZigZag 15% 枢轴 → 沪深300每年最大做多收益率。
+"""ZigZag 15% 枢轴 → 沪深300每年潜在最大收益与潜在最大损失。
 
 使用 zigzag_pivots 在 HS300 day high/low 上标记阶段高/低点（15% 反转阈值），
 提取所有 L→H 上升段（做多机会），并在日历年边界处切分——每段收益归到
@@ -221,7 +221,7 @@ def main() -> None:
     segments = compute_year_segments(pivots, dates, closes, len(dates))
     yearly = yearly_max(segments)
 
-    print(f"{'年份':>6}  {'最大做多收益':>12}  {'段起日→段止日':>26}  {'段起价→段止价':>22}  {'交易#':>5}  {'交易总收益':>10}  {'年段数':>6}")
+    print(f"{'年份':>6}  {'潜在最大收益':>12}  {'段起日→段止日':>26}  {'段起价→段止价':>22}  {'交易#':>5}  {'交易总收益':>10}  {'年段数':>6}")
     print("-" * 100)
     for row in yearly:
         open_mark = "⚡" if row["leg_open"] else " "
@@ -238,20 +238,20 @@ def main() -> None:
     all_max = np.array([r["max_return_pct"] for r in yearly])
     best = max(yearly, key=lambda x: x["max_return_pct"])
     worst = min(yearly, key=lambda x: x["max_return_pct"])
-    print(f"\n每年最大做多收益率统计:")
+    print(f"\n每年潜在最大收益统计:")
     print(f"  均值: {all_max.mean():.2f}% 中位: {np.median(all_max):.2f}%")
     print(f"  最高: {best['year']}年 {best['max_return_pct']:.2f}%")
     print(f"  最低: {worst['year']}年 {worst['max_return_pct']:.2f}%")
 
-    # 回撤分析（H→L 下降段，对称逻辑）
+    # 潜在最大损失（H→L 下降段，对称逻辑）
     dd_segments = compute_year_drawdown_segments(pivots, dates, closes, len(dates))
     yearly_dd = yearly_max_drawdown(dd_segments)
 
-    print(f"\n{'年份':>6}  {'最大回撤':>10}  {'段起日→段止日':>26}  {'段起价→段止价':>22}  {'交易#':>5}  {'交易总收益':>10}  {'年段数':>6}")
+    print(f"\n{'年份':>6}  {'潜在最大损失':>12}  {'段起日→段止日':>26}  {'段起价→段止价':>22}  {'交易#':>5}  {'交易总收益':>10}  {'年段数':>6}")
     print("-" * 100)
     for row in yearly_dd:
         open_mark = "⚡" if row["leg_open"] else " "
-        print(f"{row['year']:>6}  {row['max_drawdown_pct']:>8.2f}%  "
+        print(f"{row['year']:>6}  {row['max_drawdown_pct']:>10.2f}%  "
               f"{row['seg_start_date']}→{row['seg_end_date']}  "
               f"{row['seg_start_price']:>8.2f}→{row['seg_end_price']:>8.2f}  "
               f"#{row['leg_no']:>3}{open_mark}   {row['leg_total_pct']:>7.2f}%  "
@@ -260,7 +260,7 @@ def main() -> None:
     all_dd = np.array([r["max_drawdown_pct"] for r in yearly_dd])
     worst_dd = min(yearly_dd, key=lambda x: x["max_drawdown_pct"])
     mildest_dd = max(yearly_dd, key=lambda x: x["max_drawdown_pct"])
-    print(f"\n每年最大回撤统计:")
+    print(f"\n每年潜在最大损失统计:")
     print(f"  均值: {all_dd.mean():.2f}% 中位: {np.median(all_dd):.2f}%")
     print(f"  最深: {worst_dd['year']}年 {worst_dd['max_drawdown_pct']:.2f}%")
     print(f"  最浅: {mildest_dd['year']}年 {mildest_dd['max_drawdown_pct']:.2f}%")
@@ -308,26 +308,26 @@ def main() -> None:
         ax1.grid(True, alpha=0.3)
         ax1.legend(loc="upper left", fontsize=8)
 
-        # 中面板：每年最大做多收益柱形图
+        # 中面板：每年潜在最大收益柱形图
         years_disp = [r["year"] for r in yearly]
         returns_disp = [r["max_return_pct"] for r in yearly]
         colors = ["#d62728" if v < 0 else "#2ca02c" for v in returns_disp]
         ax2.bar(years_disp, returns_disp, color=colors, width=0.7)
         ax2.axhline(0, color="#444", lw=0.5)
-        ax2.set_ylabel("最大做多收益 (%)")
+        ax2.set_ylabel("潜在最大收益 (%)")
         ax2.set_title(
-            f"每年最大做多收益率（ZigZag {args.pct:.0%}，跨年持仓按日历年切分）")
+            f"每年潜在最大收益（L→H 上升段中涨幅最大的一段，ZigZag {args.pct:.0%}，跨年按日历年切分）")
         ax2.grid(True, alpha=0.3, axis="y")
 
-        # 下面板：每年最大回撤柱形图（红色向下）
+        # 下面板：每年潜在最大损失柱形图（红色向下）
         dd_years_disp = [r["year"] for r in yearly_dd]
         dd_disp = [r["max_drawdown_pct"] for r in yearly_dd]
         ax3.bar(dd_years_disp, dd_disp, color="#d62728", width=0.7, alpha=0.85)
         ax3.axhline(0, color="#444", lw=0.5)
-        ax3.set_ylabel("最大回撤 (%)")
+        ax3.set_ylabel("潜在最大损失 (%)")
         ax3.set_xlabel("年份")
         ax3.set_title(
-            f"每年最大回撤（H→L 下降段，ZigZag {args.pct:.0%}，跨年同样切分）")
+            f"每年潜在最大损失（H→L 下降段中跌幅最深的一段，ZigZag {args.pct:.0%}，跨年同样切分）")
         ax3.grid(True, alpha=0.3, axis="y")
 
         output = args.output
