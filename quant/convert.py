@@ -2875,13 +2875,35 @@ def convert_index_adjust_history(data_path: str, output_dir: str) -> int:
     ).sort("priority").unique(
         subset=["index_code", "effective_ym", "constituent_code", "direction"], keep="first")
 
+    # 第二遍：折叠跨月近重复——同一调整被 news_xlsx（effective≈公告日，偏早）与 adjust_raw
+    # （真实 effective，偏晚约 17 天）同时记录，跨月时 ym 去重失效。按 (index, code, direction)
+    # 组内 effective_date 升序，gap ≤ 45 天视为同次调整（定期调整间隔 ≥ 5 个月，窗口安全），
+    # 保留较晚（真实 effective）的那条。
+    df = df.sort(["index_code", "constituent_code", "direction", "effective_date"])
+    df = df.with_columns(
+        _gap=(pl.col("effective_date")
+              - pl.col("effective_date").shift(1).over("index_code", "constituent_code", "direction"))
+             .dt.total_days()
+    ).with_columns(
+        _new_cluster=pl.col("_gap").is_null() | (pl.col("_gap") > 45)
+    ).with_columns(
+        _cluster=pl.col("_new_cluster").cum_sum().over("index_code", "constituent_code", "direction")
+    )
+    n_before = df.height
+    df = (df.sort(["index_code", "constituent_code", "direction", "_cluster", "effective_date", "priority"])
+            .group_by(["index_code", "constituent_code", "direction", "_cluster"], maintain_order=True)
+            .last())
+    if df.height < n_before:
+        print(f"  跨月近重复折叠：{n_before} → {df.height}（-{n_before - df.height}）")
+
     # --- e. 按 effective_date 年份分文件 ---
     out = Path(output_dir) / "index_adjust_history"
     out.mkdir(parents=True, exist_ok=True)
     df = df.with_columns(_year=pl.col("effective_date").dt.year())
     years = sorted(df["_year"].unique().to_list())
     for y in years:
-        g = df.filter(pl.col("_year") == y).drop(["effective_ym", "priority", "_year"])
+        g = df.filter(pl.col("_year") == y).drop(
+            ["effective_ym", "priority", "_year", "_gap", "_new_cluster", "_cluster"])
         g.write_parquet(out / f"{y}.parquet")
     print(f"Saved index_adjust_history: {len(df)} events, {len(years)} 年 → {out}")
     return len(df)
@@ -2896,3 +2918,160 @@ def _ah_extract_date(s):
         return date.fromisoformat(str(s))
     except ValueError:
         return None
+
+
+# ============== index_constituent_history ==============
+
+_CH_INDEX_NAMES = {"000300": "沪深300", "000905": "中证500"}
+
+_CH_SCHEMA = {
+    "index_code": pl.Utf8, "index_name": pl.Utf8,
+    "constituent_code": pl.Utf8, "constituent_name": pl.Utf8,
+    "start_date": pl.Date, "end_date": pl.Date,
+}
+
+_CH_DATESTEM_RE = re.compile(r"^\d{4}-\d{2}-\d{2}$")
+
+
+def _ch_read_weight_snapshot(path: Path):
+    """读单份 weight 快照 → (snapshot_date, {code: name})。
+    xlsx/xls 取「成份券代码/成份券名称」双列；csv 仅取「证券代码」（无名称列）。"""
+    snap_date = date.fromisoformat(path.stem)
+    names: dict[str, str] = {}
+    if path.suffix.lower() == ".csv":
+        with open(path, newline="", encoding="utf-8-sig") as fh:
+            reader = csv.reader(fh)
+            header = next(reader, None) or []
+            code_idx = next((i for i, h in enumerate(header) if h.strip() == "证券代码"), None)
+            if code_idx is None:
+                return snap_date, {}
+            for row in reader:
+                if len(row) > code_idx:
+                    code = _ah_clean_code(row[code_idx])
+                    if code:
+                        names[code] = ""
+    else:
+        sheets = _ah_read_excel_sheets(path)
+        for rows in sheets.values():
+            if not rows:
+                continue
+            header = [str(c).strip() for c in rows[0]]
+            code_idx = next((i for i, h in enumerate(header) if "成份券代码" in h), None)
+            if code_idx is None:
+                continue
+            name_idx = next((i for i, h in enumerate(header) if "成份券名称" in h), None)
+            for r in rows[1:]:
+                code = _ah_clean_code(r[code_idx]) if code_idx < len(r) else None
+                if not code:
+                    continue
+                nm = r[name_idx].strip() if (name_idx is not None and name_idx < len(r)) else ""
+                names[code] = nm
+            break
+    return snap_date, names
+
+
+def _ch_back_derive(snapshot_codes, snapshot_date, events):
+    """从最新快照在册集合倒推成份区间。
+    events: [(effective_date, code, direction)] 已按 effective_date 降序。
+    返回 segments [(code, start_date, end_date)]，end_date 为 None 表示仍在册。"""
+    current = {c: [None, None] for c in snapshot_codes}  # code -> [start, end]
+    segments = []
+    for eff, code, direction in events:
+        if direction == "out":  # T 日调出 → T 之前在册
+            if code in current:
+                print(f"  ⚠️ 异常：{code} 连续两次调出（缺中间调入），跳过")
+                continue
+            current[code] = [None, eff]
+        elif direction == "in":  # T 日调入 → T 之前不在册
+            if code not in current:
+                print(f"  ⚠️ 异常：{code} 调入但不在册（孤儿 in @ {eff}），跳过")
+                continue
+            seg = current.pop(code)
+            segments.append((code, eff, seg[1]))
+    fallback_start = min((e[0] for e in events), default=None) or snapshot_date
+    for code, (start, end) in current.items():
+        segments.append((code, start or fallback_start, end))
+    return segments
+
+
+def convert_index_constituent_history(
+    data_path: str,
+    adjust_dir: str,
+    output_dir: str,
+    index_codes: list[str] | None = None,
+) -> int:
+    """基于最新 weight 锚点 + index_adjust_history，反推成份股入/出区间。
+    输出 {output_dir}/index_constituent_history/{index_code}/{year}.parquet（区间跨年份展开）。"""
+    if index_codes is None:
+        index_codes = ["000300", "000905"]
+
+    weight_root = Path(data_path) / "csindex" / "index_weight"
+    adjust_glob = Path(adjust_dir) / "index_adjust_history"
+    out_root = Path(output_dir) / "index_constituent_history"
+
+    all_events = pl.read_parquet(str(adjust_glob / "*.parquet"))
+
+    total = 0
+    for code in index_codes:
+        idx_name = _CH_INDEX_NAMES.get(code, code)
+        wdir = weight_root / code
+        if not wdir.is_dir():
+            print(f"  跳过 {code}：无 weight 快照目录")
+            continue
+        snaps = [f for f in sorted(wdir.iterdir())
+                 if f.is_file() and _CH_DATESTEM_RE.match(f.stem)]
+        if not snaps:
+            print(f"  跳过 {code}：无 weight 快照")
+            continue
+        latest = snaps[-1]
+        T0, S0 = _ch_read_weight_snapshot(latest)
+        print(f"  {code} {idx_name}: 锚点 {latest.name} (T0={T0})，在册 {len(S0)} 只")
+
+        ev_df = (all_events.filter(pl.col("index_code") == code)
+                 .filter(pl.col("effective_date").is_not_null())
+                 .filter(pl.col("effective_date") <= T0)  # 排除锚点之后的未来调整
+                 .select("effective_date", "constituent_code", "constituent_name", "direction")
+                 .sort("effective_date", descending=True))
+        effs = ev_df["effective_date"].to_list()
+        ccodes = ev_df["constituent_code"].to_list()
+        cnames = ev_df["constituent_name"].to_list()
+        dirs = ev_df["direction"].to_list()
+        print(f"  {code}: {len(effs)} 条调整事件")
+
+        # 名称合并：事件名优先（按降序，先到先得=最新），快照名补全
+        names: dict[str, str] = {}
+        for nm, c in zip(cnames, ccodes):
+            if nm and c not in names:
+                names[c] = nm
+        for c, nm in S0.items():
+            if nm and c not in names:
+                names[c] = nm
+
+        segments = _ch_back_derive(set(S0.keys()), T0, list(zip(effs, ccodes, dirs)))
+
+        # 年份展开写文件
+        idx_dir = out_root / code
+        idx_dir.mkdir(parents=True, exist_ok=True)
+        for old in idx_dir.glob("*.parquet"):
+            old.unlink()
+
+        rows = []
+        for c, start, end in segments:
+            if start is None:
+                continue
+            end_year = T0.year if end is None else end.year
+            for y in range(start.year, end_year + 1):
+                rows.append((y, code, idx_name, c, names.get(c, ""), start, end))
+
+        if not rows:
+            print(f"  {code}: 无区间产出")
+            continue
+        df = pl.DataFrame(rows, schema={"_year": pl.Int64, **_CH_SCHEMA}, orient="row")
+        for y in sorted(df["_year"].unique().to_list()):
+            g = df.filter(pl.col("_year") == y).drop("_year")
+            g.write_parquet(idx_dir / f"{y}.parquet")
+        total += df.height
+        print(f"  {code}: {len(segments)} 段 → 展开 {df.height} 行 → {df['_year'].n_unique()} 个年份文件")
+
+    print(f"Saved index_constituent_history: {total} 行")
+    return total
