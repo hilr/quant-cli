@@ -1,6 +1,28 @@
-# zigzag_annual_return 分析结果
+# zigzag_annual_return — ZigZag 枢轴每年最大做多收益率（沪深300）
 
-`zigzag_annual_return.py` 的分析结果快照。本文件随数据更新，由脚本控制台输出誊写。
+`zigzag_annual_return.py` 的完整文档与分析结果快照。结果部分随数据更新，由脚本控制台输出誊写。
+
+## 用法
+
+```bash
+# 沪深300，15% 阈值
+uv run python plots/zigzag_annual_return.py
+
+# 只打印表格不画图
+uv run python plots/zigzag_annual_return.py --pct 0.15
+
+# 改阈值 + 输出图
+uv run python plots/zigzag_annual_return.py --pct 0.10 --output /mnt/dataset/zigzag_annual_return_000300.png
+```
+
+| 参数 | 说明 | 默认 |
+|------|------|------|
+| `--index-dir` | 指数 parquet 父目录 | /mnt/dataset/index_quote_history |
+| `--code` | 指数代码 | 000300（沪深300） |
+| `--pct` | ZigZag 反转阈值 | 0.15 |
+| `--output` | 输出 PNG 路径（不指定则只打印表格） | None |
+
+**输出：** 控制台年度表格 + 双面板 PNG（上=价格+枢轴+上升段高亮，虚线为持仓中波段；下=每年最大做多收益柱形）。
 
 ## 方法
 
