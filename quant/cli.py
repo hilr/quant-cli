@@ -16,7 +16,8 @@ from quant.convert import (convert_stock_quote, convert_margin_trade, convert_ad
                            convert_gov_stat_retail_monthly,
                            convert_turnover_concentration,
                            convert_exchange_hkex_southbound_flow,
-                           convert_index_adjust_history)
+                           convert_index_adjust_history,
+                           convert_index_constituent_history)
 from quant.filter import (filter_volume_spike as run_filter_volume_spike,
                           filter_ma_converge as run_filter_ma_converge,
                           filter_by_tags as run_filter_by_tags,
@@ -75,6 +76,21 @@ def index_adjust_history(
     console.print(f"[cyan]解析指数成份调整记录...[/cyan]")
     count = convert_index_adjust_history(data_path=data_path, output_dir=output_dir)
     console.print(f"[green]完成! 共 {count} 条调整事件[/green]")
+
+
+@cli.command()
+def index_constituent_history(
+    data_path: str,
+    adjust_dir: str,
+    output_dir: str,
+    index_codes: list[str] = typer.Option(["000300", "000905"], "--index-code", "-i"),
+) -> None:
+    """基于调整历史 + 最新 weight 锚点，反推指数成份股入/出区间（按指数/年份分文件）"""
+    console.print(f"[cyan]反推指数成份历史...[/cyan]")
+    count = convert_index_constituent_history(
+        data_path=data_path, adjust_dir=adjust_dir,
+        output_dir=output_dir, index_codes=index_codes)
+    console.print(f"[green]完成! 共 {count} 行区间（已跨年份展开）[/green]")
 
 
 @cli.command()
