@@ -2610,3 +2610,289 @@ def convert_exchange_hkex_southbound_flow(data_path: str, output_dir: str) -> in
     df.write_csv(out_path / "southbound_flow.csv")
     print(f"Saved southbound_flow: {len(df)} rows to {out_path}")
     return len(df)
+
+
+# ============== index_adjust_history（指数成份调整历史）==============
+
+import json
+
+_ADJUST_IN_SHEETS = {"调入", "换入", "addition"}
+_ADJUST_OUT_SHEETS = {"调出", "换出", "deletion"}
+_CODE6_RE = re.compile(r"^\d{6}$")
+_EFFECTIVE_RE = re.compile(r"于\s*(\d{4})\s*年\s*(\d{1,2})\s*月\s*(\d{1,2})\s*日.*?生效")
+_REPLACE_COUNT_RE = re.compile(r"([一-龥]+[A-Za-z0-9]{0,6}?)指数更换(\d+)只")
+
+# 静态指数名→代码（运行时从 xlsx 数据动态补充）
+_INDEX_NAME_TO_CODE = {
+    "沪深300": "000300", "中证500": "000905", "中证1000": "000852",
+    "中证100": "000903", "中证200": "000908", "中证800": "000906",
+    "中证A50": "930050", "中证A100": "930100", "中证A500": "932000",
+}
+
+
+def _ah_resolve_index(name: str, mapping: dict):
+    """指数名 → (code, canonical_name)。先精确匹配，再子串模糊（应对「其中沪深300」等前缀）。"""
+    name = (name or "").strip()
+    if name in mapping:
+        return mapping[name], name
+    for k, v in mapping.items():
+        if k in name or name in k:
+            return v, k
+    return "", name
+
+_ADJUST_SCHEMA = {
+    "index_code": pl.Utf8, "index_name": pl.Utf8,
+    "announce_date": pl.Date, "effective_date": pl.Date,
+    "constituent_code": pl.Utf8, "constituent_name": pl.Utf8,
+    "direction": pl.Utf8, "source": pl.Utf8,
+}
+
+
+def _ah_read_excel_sheets(path: Path) -> dict:
+    """读 xls/xlsx（含 OLE2 伪 xlsx）→ {sheet_name: list[list[str]]}。"""
+    try:
+        wb = CalamineWorkbook.from_path(str(path))
+        return {sn: [["" if c is None else str(c) for c in r]
+                     for r in wb.get_sheet_by_name(sn).to_python()]
+                for sn in wb.sheet_names}
+    except Exception:
+        import xlrd
+        wb = xlrd.open_workbook(str(path))
+        return {s.name: [[str(c) for c in s.row_values(i)] for i in range(s.nrows)]
+                for s in wb.sheets()}
+
+
+def _ah_clean_code(v) -> str | None:
+    if v is None:
+        return None
+    s = str(v).strip().split(".")[0]
+    return s if _CODE6_RE.match(s) else None
+
+
+def _ah_parse_adjust_xlsx(path: Path):
+    """解析调整 xlsx → [(index_code, index_name, code, name, direction)]。
+    兼容两种结构：A=调入/调出分 sheet(4列)；B=单表「调出|调入」双列对(6列)。"""
+    sheets = _ah_read_excel_sheets(path)
+    events = []
+    # 结构 A：按 sheet 名判方向
+    for sn, rows in sheets.items():
+        snl = str(sn).strip().lower()
+        if snl in _ADJUST_IN_SHEETS:
+            direction = "in"
+        elif snl in _ADJUST_OUT_SHEETS:
+            direction = "out"
+        else:
+            continue
+        for row in rows[1:]:
+            if len(row) < 4:
+                continue
+            idx_code = str(row[0]).strip()
+            code = _ah_clean_code(row[2])
+            if not idx_code or not code:
+                continue
+            events.append((idx_code, str(row[1]).strip(), code, str(row[3]).strip(), direction))
+    if events:
+        return events
+    # 结构 B：单表双列对，找含「调出」「调入」的表头行
+    for rows in sheets.values():
+        hdr = None
+        for i in range(min(3, len(rows))):
+            cells = [str(c) for c in rows[i]]
+            if any("调出" in c for c in cells) and any("调入" in c for c in cells):
+                hdr = i
+                break
+        if hdr is None:
+            continue
+        for row in rows[hdr + 1:]:
+            if len(row) < 6:
+                continue
+            idx_code = str(row[0]).strip()
+            if not idx_code:
+                continue
+            idx_name = str(row[1]).strip()
+            out_code = _ah_clean_code(row[2])
+            in_code = _ah_clean_code(row[4])
+            if out_code:
+                events.append((idx_code, idx_name, out_code, str(row[3]).strip(), "out"))
+            if in_code:
+                events.append((idx_code, idx_name, in_code, str(row[5]).strip(), "in"))
+        if events:
+            return events
+    return events
+
+
+def _ah_load_meta(news_dir: Path) -> dict:
+    mp = news_dir / "meta.json"
+    if mp.is_file():
+        try:
+            return json.loads(mp.read_text(encoding="utf-8"))
+        except Exception:
+            return {}
+    return {}
+
+
+def _ah_read_content(news_dir: Path) -> str:
+    cp = news_dir / "content.txt"
+    if cp.is_file():
+        return cp.read_text(encoding="utf-8", errors="ignore")
+    return ""
+
+
+def _ah_extract_effective(content: str):
+    m = _EFFECTIVE_RE.search(content)
+    if m:
+        try:
+            return date(int(m[1]), int(m[2]), int(m[3]))
+        except ValueError:
+            return None
+    return None
+
+
+def _ah_extract_counts(content: str):
+    """从正文提取 [(index_name, n)]（按出现顺序），用于 PDF 切分。"""
+    return [(m[1].strip(), int(m[2])) for m in _REPLACE_COUNT_RE.finditer(content)]
+
+
+def _ah_parse_adjust_pdf(path: Path, counts, name_to_code: dict):
+    """解析定期调整 PDF → [(index_code, index_name, code, name, direction)]。
+    表格为「调出|调入」双列对，按正文各指数更换数量顺序切分。"""
+    import pdfplumber
+    pdf = pdfplumber.open(str(path))
+    data = []  # (out_code, out_name, in_code, in_name)
+    for pg in pdf.pages:
+        for t in (pg.extract_tables() or []):
+            for row in t:
+                if not row:
+                    continue
+                joined = "".join(str(c) for c in row if c)
+                if any(k in joined for k in ("名单", "代码", "名称", "指数", "Index", "调整")):
+                    continue
+                if row[0] and _CODE6_RE.match(str(row[0]).strip()):
+                    data.append([str(c).strip() if c else "" for c in row[:4]])
+    events = []
+    idx = 0
+    for name, n in counts:
+        code, canon = _ah_resolve_index(name, name_to_code)
+        block = data[idx:idx + n]
+        idx += n
+        for r in block:
+            out_code = _ah_clean_code(r[0])
+            in_code = _ah_clean_code(r[2]) if len(r) > 2 else None
+            if out_code:
+                events.append((code, canon, out_code, r[1], "out"))
+            if in_code:
+                events.append((code, canon, in_code, r[3], "in"))
+    return events
+
+
+def convert_index_adjust_history(data_path: str, output_dir: str) -> int:
+    """合并 index_adjust_raw + csindex_news（xlsx 优先，PDF 补缺）→ 按年分文件的调整事件表。
+    输出 {output_dir}/index_adjust_history/{year}.parquet。"""
+    base = Path(data_path) / "csindex"
+    name_to_code = dict(_INDEX_NAME_TO_CODE)
+    events = []  # (index_code, index_name, announce, effective, code, name, direction, source)
+
+    # --- a. index_adjust_raw（xlsx，全扫）---
+    raw_dir = base / "index_adjust_raw"
+    if raw_dir.is_dir():
+        for f in sorted(raw_dir.rglob("*")):
+            if f.suffix.lower() not in (".xlsx", ".xls") or not f.is_file():
+                continue
+            try:
+                d = date.fromisoformat(f.stem)
+            except ValueError:
+                continue
+            try:
+                parsed = _ah_parse_adjust_xlsx(f)
+            except Exception as e:
+                print(f"  跳过 {f}: {e}")
+                continue
+            for idx_code, idx_name, code, name, direction in parsed:
+                name_to_code.setdefault(idx_name, idx_code)
+                events.append((idx_code, idx_name, d, d, code, name, direction, "adjust_raw"))
+        print(f"  index_adjust_raw: 累计 {len(events)} 条")
+
+    # --- b. csindex_news xlsx 附件 ---
+    news_dir = base / "csindex_data" / "csindex_news"
+    n_before = len(events)
+    if news_dir.is_dir():
+        for nd in sorted(news_dir.iterdir()):
+            if not nd.is_dir():
+                continue
+            meta = _ah_load_meta(nd)
+            announce = _ah_extract_date(meta.get("date"))
+            effective = _ah_extract_effective(_ah_read_content(nd)) or announce
+            for xf in sorted(nd.iterdir()):
+                if xf.suffix.lower() not in (".xlsx", ".xls"):
+                    continue
+                try:
+                    parsed = _ah_parse_adjust_xlsx(xf)
+                except Exception as e:
+                    print(f"  跳过 {nd.name}/{xf.name}: {e}")
+                    continue
+                for idx_code, idx_name, code, name, direction in parsed:
+                    name_to_code.setdefault(idx_name, idx_code)
+                    events.append((idx_code, idx_name, announce, effective, code, name, direction, "news_xlsx"))
+        print(f"  csindex_news xlsx: +{len(events) - n_before} 条")
+
+    # --- c. csindex_news PDF（补 2023+ 定期）---
+    n_before = len(events)
+    if news_dir.is_dir():
+        for nd in sorted(news_dir.iterdir()):
+            if not nd.is_dir():
+                continue
+            pdfs = [f for f in nd.iterdir() if f.suffix.lower() == ".pdf"]
+            if not pdfs:
+                continue
+            content = _ah_read_content(nd)
+            counts = _ah_extract_counts(content)
+            if not counts:
+                continue
+            meta = _ah_load_meta(nd)
+            announce = _ah_extract_date(meta.get("date"))
+            effective = _ah_extract_effective(content) or announce
+            for pdf in pdfs:
+                try:
+                    parsed = _ah_parse_adjust_pdf(pdf, counts, name_to_code)
+                except Exception as e:
+                    print(f"  PDF 跳过 {nd.name}/{pdf.name}: {e}")
+                    continue
+                for idx_code, idx_name, code, name, direction in parsed:
+                    events.append((idx_code, idx_name, announce, effective, code, name, direction, "news_pdf"))
+        print(f"  csindex_news PDF: +{len(events) - n_before} 条")
+
+    if not events:
+        raise RuntimeError("未解析到任何调整事件")
+
+    # --- d. 合并去重（source 优先级 news_xlsx > adjust_raw > news_pdf）---
+    df = pl.DataFrame(events, schema=_ADJUST_SCHEMA, orient="row")
+    df = df.filter(pl.col("effective_date").is_not_null())
+    df = df.with_columns(
+        effective_ym=pl.col("effective_date").dt.strftime("%Y-%m"),
+        priority=pl.when(pl.col("source") == "news_xlsx").then(0)
+                  .when(pl.col("source") == "adjust_raw").then(1)
+                  .otherwise(2),
+    ).sort("priority").unique(
+        subset=["index_code", "effective_ym", "constituent_code", "direction"], keep="first")
+
+    # --- e. 按 effective_date 年份分文件 ---
+    out = Path(output_dir) / "index_adjust_history"
+    out.mkdir(parents=True, exist_ok=True)
+    df = df.with_columns(_year=pl.col("effective_date").dt.year())
+    years = sorted(df["_year"].unique().to_list())
+    for y in years:
+        g = df.filter(pl.col("_year") == y).drop(["effective_ym", "priority", "_year"])
+        g.write_parquet(out / f"{y}.parquet")
+    print(f"Saved index_adjust_history: {len(df)} events, {len(years)} 年 → {out}")
+    return len(df)
+
+
+def _ah_extract_date(s):
+    if isinstance(s, date):
+        return s
+    if not s:
+        return None
+    try:
+        return date.fromisoformat(str(s))
+    except ValueError:
+        return None
