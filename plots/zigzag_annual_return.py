@@ -109,6 +109,38 @@ def compute_year_segments(
     return segments
 
 
+def compute_year_drawdown_segments(
+    pivots: list[tuple[int, float, str]],
+    dates: list,
+    closes: list,
+    n: int,
+) -> list[dict]:
+    """提取所有 H→L 下降段 + 最后一个未完结的 H→? 波段，按日历年切分。
+
+    与上升段对称：年末最后交易日强制「卖出」（结束当年回撤观察）、年初第一交易日
+    重新「买入」（重启回撤基点）。跨年跳空不归入任何一年。
+    """
+    segments: list[dict] = []
+    leg_no = 0
+    for a, b in zip(pivots, pivots[1:]):
+        _, _, a_kind = a
+        _, _, b_kind = b
+        if a_kind != "H" or b_kind != "L":
+            continue
+        leg_no += 1
+        segments.extend(_segment_leg(a[0], b[0], leg_no, dates, closes))
+
+    # 未完结的最后下降段：最后枢轴是 H，至今未反转到 L
+    if pivots and pivots[-1][2] == "H":
+        a_idx = pivots[-1][0]
+        b_idx = n - 1
+        if b_idx > a_idx:
+            leg_no += 1
+            segments.extend(
+                _segment_leg(a_idx, b_idx, leg_no, dates, closes, is_open=True))
+    return segments
+
+
 def yearly_max(segments: list[dict]) -> list[dict]:
     """按年份分组，取每年最大段收益。年份升序。"""
     by_year: dict[int, list[dict]] = {}
@@ -129,6 +161,31 @@ def yearly_max(segments: list[dict]) -> list[dict]:
             leg_buy_date=str(best["leg_buy_date"]),
             leg_sell_date=str(best["leg_sell_date"]),
             leg_open=best.get("leg_open", False),
+            n_segments=len(by_year[year]),
+        ))
+    return out
+
+
+def yearly_max_drawdown(segments: list[dict]) -> list[dict]:
+    """按年份分组，取每年最大回撤（最负的段收益）。年份升序。"""
+    by_year: dict[int, list[dict]] = {}
+    for seg in segments:
+        by_year.setdefault(seg["year"], []).append(seg)
+    out = []
+    for year in sorted(by_year.keys()):
+        worst = min(by_year[year], key=lambda x: x["return_pct"])
+        out.append(dict(
+            year=year,
+            max_drawdown_pct=round(worst["return_pct"], 2),
+            seg_start_date=str(worst["start_date"]),
+            seg_end_date=str(worst["end_date"]),
+            seg_start_price=round(worst["start_price"], 2),
+            seg_end_price=round(worst["end_price"], 2),
+            leg_no=worst["leg_no"],
+            leg_total_pct=round(worst["leg_total_pct"], 2),
+            leg_buy_date=str(worst["leg_buy_date"]),
+            leg_sell_date=str(worst["leg_sell_date"]),
+            leg_open=worst.get("leg_open", False),
             n_segments=len(by_year[year]),
         ))
     return out
@@ -186,13 +243,35 @@ def main() -> None:
     print(f"  最高: {best['year']}年 {best['max_return_pct']:.2f}%")
     print(f"  最低: {worst['year']}年 {worst['max_return_pct']:.2f}%")
 
+    # 回撤分析（H→L 下降段，对称逻辑）
+    dd_segments = compute_year_drawdown_segments(pivots, dates, closes, len(dates))
+    yearly_dd = yearly_max_drawdown(dd_segments)
+
+    print(f"\n{'年份':>6}  {'最大回撤':>10}  {'段起日→段止日':>26}  {'段起价→段止价':>22}  {'交易#':>5}  {'交易总收益':>10}  {'年段数':>6}")
+    print("-" * 100)
+    for row in yearly_dd:
+        open_mark = "⚡" if row["leg_open"] else " "
+        print(f"{row['year']:>6}  {row['max_drawdown_pct']:>8.2f}%  "
+              f"{row['seg_start_date']}→{row['seg_end_date']}  "
+              f"{row['seg_start_price']:>8.2f}→{row['seg_end_price']:>8.2f}  "
+              f"#{row['leg_no']:>3}{open_mark}   {row['leg_total_pct']:>7.2f}%  "
+              f"{row['n_segments']:>6}")
+
+    all_dd = np.array([r["max_drawdown_pct"] for r in yearly_dd])
+    worst_dd = min(yearly_dd, key=lambda x: x["max_drawdown_pct"])
+    mildest_dd = max(yearly_dd, key=lambda x: x["max_drawdown_pct"])
+    print(f"\n每年最大回撤统计:")
+    print(f"  均值: {all_dd.mean():.2f}% 中位: {np.median(all_dd):.2f}%")
+    print(f"  最深: {worst_dd['year']}年 {worst_dd['max_drawdown_pct']:.2f}%")
+    print(f"  最浅: {mildest_dd['year']}年 {mildest_dd['max_drawdown_pct']:.2f}%")
+
     if args.output:
         plt.rcParams["font.sans-serif"] = ["Noto Sans SC", "WenQuanYi Zen Hei"]
         plt.rcParams["axes.unicode_minus"] = False
 
-        fig, (ax1, ax2) = plt.subplots(
-            2, 1, figsize=(14, 8),
-            gridspec_kw={"height_ratios": [1.2, 0.8]},
+        fig, (ax1, ax2, ax3) = plt.subplots(
+            3, 1, figsize=(14, 11),
+            gridspec_kw={"height_ratios": [1.2, 0.8, 0.8]},
             constrained_layout=True,
         )
 
@@ -229,17 +308,27 @@ def main() -> None:
         ax1.grid(True, alpha=0.3)
         ax1.legend(loc="upper left", fontsize=8)
 
-        # 下面板：每年最大做多收益柱形图
+        # 中面板：每年最大做多收益柱形图
         years_disp = [r["year"] for r in yearly]
         returns_disp = [r["max_return_pct"] for r in yearly]
         colors = ["#d62728" if v < 0 else "#2ca02c" for v in returns_disp]
         ax2.bar(years_disp, returns_disp, color=colors, width=0.7)
         ax2.axhline(0, color="#444", lw=0.5)
         ax2.set_ylabel("最大做多收益 (%)")
-        ax2.set_xlabel("年份")
         ax2.set_title(
             f"每年最大做多收益率（ZigZag {args.pct:.0%}，跨年持仓按日历年切分）")
         ax2.grid(True, alpha=0.3, axis="y")
+
+        # 下面板：每年最大回撤柱形图（红色向下）
+        dd_years_disp = [r["year"] for r in yearly_dd]
+        dd_disp = [r["max_drawdown_pct"] for r in yearly_dd]
+        ax3.bar(dd_years_disp, dd_disp, color="#d62728", width=0.7, alpha=0.85)
+        ax3.axhline(0, color="#444", lw=0.5)
+        ax3.set_ylabel("最大回撤 (%)")
+        ax3.set_xlabel("年份")
+        ax3.set_title(
+            f"每年最大回撤（H→L 下降段，ZigZag {args.pct:.0%}，跨年同样切分）")
+        ax3.grid(True, alpha=0.3, axis="y")
 
         output = args.output
         output.parent.mkdir(parents=True, exist_ok=True)

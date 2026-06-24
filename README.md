@@ -68,7 +68,7 @@
 | industry_heatmap | 行业成交额-涨幅方块热力图（finviz 风格，全 A 股聚合） | [文档](plots/industry_heatmap.md) |
 | industry_turnover_stack | 行业成交额占比 river 图（streamgraph，时序） | [文档](plots/industry_turnover_stack.md) |
 | turnover_channel_breakout | 成交额通道重入信号（沪深300，log Bollinger + ZigZag 评估） | [文档](plots/turnover_channel_breakout.md) |
-| zigzag_annual_return | ZigZag 枢轴每年最大做多收益率（沪深300） | [文档](plots/zigzag_annual_return.md) |
+| zigzag_annual_return | ZigZag 枢轴每年最大做多收益率与最大回撤（沪深300） | [文档](plots/zigzag_annual_return.md) |
 
 ---
 
