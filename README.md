@@ -56,6 +56,7 @@
 | fund_quote_history | 生成 | 基金行情历史 | [文档](docs/datasets/fund_quote_history.md) |
 | fund_flow | 生成 | 基金资金流 | [文档](docs/datasets/fund_flow.md) |
 | fund_hs300_correlation | 生成 | 沪深300关联基金滚动相关性 | [文档](docs/datasets/fund_hs300_correlation.md) |
+| index_adjust_history | 生成 | 指数成份调整历史（调入/调出事件流，2015-2026，按年分文件） | [文档](docs/datasets/index_adjust_history.md) |
 
 ---
 
