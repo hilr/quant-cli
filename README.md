@@ -149,7 +149,12 @@ uv run python plots/turnover_channel_breakout.py --code 000001
 - buy 信号 66 次：距最近 L pivot 中位 +11 日（价格中位 -3.94%），≤15 日命中 52%
 - 信号普遍早于价格极端点，符合「成交额先行」直觉
 
+### zigzag_annual_return — ZigZag 枢轴每年最大做多收益率（沪深300）
+
+用 ZigZag（15% 阈值）标记沪深300 阶段高/低点，提取 L→H 上升段并按日历年边界切分，算每年最大做多收益率。完整文档与年度明细见 [`plots/zigzag_annual_return.md`](plots/zigzag_annual_return.md)。
+
 ---
+
 
 ## Tag 层
 
