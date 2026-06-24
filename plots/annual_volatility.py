@@ -1,7 +1,12 @@
 """沪深300 每年年化波动率 + 与指数走势对照。
 
-年化波动率（close-to-close realized vol）= 每日对数收益率 std × √(trading_days)，
-按日历年分组。附滚动 N 日年化波动率，对照价格走势。
+两种口径：
+- **close-to-close**：每日对数收益率 std × √(trading_days)
+- **ATR（真实波幅）**：每日 True Range / close 的年内均值 × √(trading_days)
+  True Range = max(high−low, |high−prev_close|, |low−prev_close|)，
+  含日内振幅 + 隔夜跳空，通常高于 close-to-close 口径。
+
+按日历年分组，附滚动 N 日年化波动率，对照价格走势。
 """
 from __future__ import annotations
 
@@ -16,7 +21,8 @@ import polars as pl
 def load_index(index_dir: Path, code: str) -> pl.DataFrame:
     return (
         pl.read_parquet(
-            index_dir / f"{code}.parquet", columns=["date", "close"]
+            index_dir / f"{code}.parquet",
+            columns=["date", "close", "high", "low"],
         )
         .with_columns(pl.col("date").str.to_date("%Y-%m-%d"))
         .sort("date")
@@ -24,15 +30,27 @@ def load_index(index_dir: Path, code: str) -> pl.DataFrame:
 
 
 def annual_vol(df: pl.DataFrame, trading_days: int) -> pl.DataFrame:
-    """按日历年分组的年化波动率。"""
-    d = df.with_columns(
-        pl.col("close").log().diff().alias("log_ret"),
-        pl.col("date").dt.year().alias("year"),
+    """按日历年分组的年化波动率（close-to-close + ATR 两口径）。"""
+    d = (
+        df.with_columns(
+            pl.col("close").log().diff().alias("log_ret"),
+            pl.col("close").shift(1).alias("prev_close"),
+            pl.col("date").dt.year().alias("year"),
+        )
+        .with_columns(
+            pl.max_horizontal(
+                pl.col("high") - pl.col("low"),
+                (pl.col("high") - pl.col("prev_close")).abs(),
+                (pl.col("low") - pl.col("prev_close")).abs(),
+            ).alias("tr")
+        )
+        .with_columns((pl.col("tr") / pl.col("close")).alias("tr_pct"))
     )
     return (
         d.group_by("year")
         .agg(
             pl.col("log_ret").std(ddof=1).alias("daily_std"),
+            pl.col("tr_pct").mean().alias("atr_daily"),
             pl.col("date").count().alias("n_days"),
             pl.col("date").min().alias("first"),
             pl.col("date").max().alias("last"),
@@ -40,6 +58,7 @@ def annual_vol(df: pl.DataFrame, trading_days: int) -> pl.DataFrame:
         .sort("year")
         .with_columns(
             (pl.col("daily_std") * (trading_days**0.5)).alias("ann_vol"),
+            (pl.col("atr_daily") * (trading_days**0.5)).alias("atr_vol"),
         )
     )
 
@@ -77,23 +96,23 @@ def main() -> None:
 
     print(f"\n=== 沪深300 每年年化波动率（√{args.trading_days}）===")
     print(f"数据区间: {dates[0]} ~ {dates[-1]}（{len(dates)} 个交易日）")
-    print(f"\n{'年':>6} {'年化波动率':>10} {'日均波动':>9} {'交易日':>6}  {'区间'}")
-    print("-" * 62)
+    print(f"\n{'年':>6} {'close-to-close':>15} {'ATR(真实波幅)':>15} {'日均TR':>8} {'交易日':>6}  {'区间'}")
+    print("-" * 74)
     for r in per_year.iter_rows(named=True):
-        print(f"{r['year']:>6} {r['ann_vol']*100:>9.2f}% "
-              f"{r['daily_std']*100:>8.3f}% {r['n_days']:>6}  "
-              f"{r['first']}~{r['last']}")
+        print(f"{r['year']:>6} {r['ann_vol']*100:>14.2f}% "
+              f"{r['atr_vol']*100:>14.2f}% {r['atr_daily']*100:>7.3f}% "
+              f"{r['n_days']:>6}  {r['first']}~{r['last']}")
 
     vols = per_year["ann_vol"].to_numpy() * 100
+    atrs = per_year["atr_vol"].to_numpy() * 100
     full_years = per_year.filter(pl.col("n_days") >= 200)
     full_vols = full_years["ann_vol"].to_numpy() * 100
     print(f"\n统计（全部 {len(per_year)} 年）:")
-    print(f"  均值: {vols.mean():.2f}%  中位: {np.median(vols):.2f}%")
-    print(f"  最高: {per_year.row(per_year['ann_vol'].arg_max(), named=True)['year']}年 "
-          f"{vols.max():.2f}%")
-    print(f"  最低: {per_year.row(per_year['ann_vol'].arg_min(), named=True)['year']}年 "
-          f"{vols.min():.2f}%")
-    print(f"  完整年份（≥200 交易日，{len(full_years)} 年）均值: "
+    print(f"  close-to-close: 均值 {vols.mean():.2f}%  中位 {np.median(vols):.2f}%  "
+          f"最高 {vols.max():.2f}%  最低 {vols.min():.2f}%")
+    print(f"  ATR:            均值 {atrs.mean():.2f}%  中位 {np.median(atrs):.2f}%  "
+          f"最高 {atrs.max():.2f}%  最低 {atrs.min():.2f}%")
+    print(f"  完整年份（≥200 交易日，{len(full_years)} 年）close-to-close 均值: "
           f"{full_vols.mean():.2f}%  中位: {np.median(full_vols):.2f}%")
 
     if not args.output:
@@ -125,20 +144,24 @@ def main() -> None:
 
     daily_vol = (
         daily.with_columns(pl.col("date").dt.year().alias("year"))
-        .join(per_year.select("year", "ann_vol"), on="year")
+        .join(per_year.select("year", "ann_vol", "atr_vol"), on="year")
     )
     ax2.step(daily_vol["date"].to_list(),
              (daily_vol["ann_vol"].to_numpy() * 100),
              where="post", color="#1f77b4", lw=2.0,
-             label="每年年化波动率")
+             label="每年年化波动率（close-to-close）")
+    ax2.step(daily_vol["date"].to_list(),
+             (daily_vol["atr_vol"].to_numpy() * 100),
+             where="post", color="#2ca02c", lw=2.0, alpha=0.85,
+             label="每年年化波动率（ATR 真实波幅）")
 
     mean_line = float(vols.mean())
     ax2.axhline(mean_line, color="#d62728", lw=1.0, ls="--", alpha=0.7,
-                label=f"全期均值 {mean_line:.1f}%")
+                label=f"close-to-close 全期均值 {mean_line:.1f}%")
 
     ax2.set_ylabel("年化波动率 (%)")
     ax2.set_xlabel("年份")
-    ax2.set_title("年化波动率（阶梯=每年，橙线=滚动，红虚=均值）",
+    ax2.set_title("年化波动率（蓝=close-to-close，绿=ATR，橙=滚动，红虚=均值）",
                   fontsize=11, fontweight="bold", loc="left")
     ax2.grid(True, alpha=0.3)
     ax2.legend(loc="upper left", fontsize=8)
