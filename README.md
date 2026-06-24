@@ -61,97 +61,14 @@
 
 ## 可视化脚本
 
-独立 argparse 脚本，放在 `plots/`，输出 PNG 到 `/mnt/dataset/`。
+独立 argparse 脚本，放在 `plots/`，输出 PNG 到 `/mnt/dataset/`。每个脚本的完整文档（用法/参数/数据源/结果）单独存放在 `plots/xxx.md`，下表只做索引。
 
-### industry_heatmap — 行业成交额-涨幅方块热力图
-
-finviz 风格的市场全景热力图（全 A 股聚合）：一个中证行业一个方块，方块面积 ∝ 该行业当日总成交额，颜色 = 行业成交额加权涨跌幅（A股惯例红涨绿跌，±5% 截断）。按加权涨幅倒序自然换行排列 → 左上=最大涨幅，右下=最大跌幅。
-
-```bash
-# 最新交易日（自动跳过残缺尾段），中证三级行业（约 94 类）
-uv run python plots/industry_heatmap.py
-
-# 中证一级行业（约 11 类，更聚合）
-uv run python plots/industry_heatmap.py --level 1
-
-# 指定日期
-uv run python plots/industry_heatmap.py --date 2026-06-18
-```
-
-| 参数 | 说明 | 默认 |
+| 脚本 | 说明 | 文档 |
 |------|------|------|
-| `--date` | 目标日期 YYYY-MM-DD | 最新行数 ≥ 4000 的交易日 |
-| `--level` | 行业层级 1/2/3/4 | 3（中证三级，约 94 类） |
-| `--data-path` | 只读原始数据根目录 | /mnt/readonly_dataset |
-| `--output` | 输出 PNG 路径 | /mnt/dataset/industry_heatmap_{date}_l{level}.png |
-
-**数据源：**
-- 行业分类：`{data_path}/csindex/industry/{date}.xlsx`（取最新一份）
-- 当日行情：`{data_path}/finance_sina/stock_quote/{date}.csv`（实时源；缺失时回退 `eastmoney/stock_quote`，已停更于 2025-11）
-
-### industry_turnover_stack — 行业成交额占比 river 图（streamgraph，时序）
-
-每条带 = 一个中证二级行业的成交额占比，沿时间连续流动（weighted-wiggle 基线）。每个行业一种固定颜色（按一级行业色相分组、组内二级用亮度区分），同色 = 同行业，便于追踪单一行业的连贯演变。行业按 (一级代码, 二级代码) 固定排序。
-
-```bash
-# 最近 30 个日历日内的交易日（默认）
-uv run python plots/industry_turnover_stack.py
-
-# 最近 60 日
-uv run python plots/industry_turnover_stack.py --days 60
-```
-
-| 参数 | 说明 | 默认 |
-|------|------|------|
-| `--days` | 最近 N 个日历日内的完整交易日 | 30 |
-| `--data-path` | 只读原始数据根目录 | /mnt/readonly_dataset |
-| `--output` | 输出 PNG 路径 | /mnt/dataset/industry_turnover_stack_{end}.png |
-
-**数据源：** 同 `industry_heatmap`（行业分类 + `finance_sina/stock_quote`，缺失回退 eastmoney）。
-
-**行业表字段：** 证券代码, 证券简称, 中证一/二/三/四级行业分类代码与简称（8394 只股票，11 个一级、35 个二级、~90 个三级、~200 个四级）
-
-### turnover_channel_breakout — 成交额通道重入信号（沪深300）
-
-成交额 log Bollinger 通道 + 价格 ZigZag 枢轴评估。核心逻辑：成交额突破通道后重入时产生买卖信号。
-
-- **通道**：对 `log(turnover)` 做 Bollinger（MA±kσ），`exp` 还原 → 成交额乘法通道。log 空间保证早期低位也被同等对待。
-- **外溢**：当日 turnover > 上轨（放量外溢）或 < 下轨（缩量外溢），全画小标记。
-- **重入信号**：sell = 成交额突破上轨外溢后跌回通道内；buy = 跌破下轨外溢后升回通道内。每段外溢只产生一次重入，无需冷却。
-- **评估**：用价格 ZigZag 找阶段高/低点（H/L），对每个重入信号找最近 pivot，报告天数及价格差距。
-
-```bash
-# 沪深300，默认参数
-uv run python plots/turnover_channel_breakout.py
-
-# 调整通道参数
-uv run python plots/turnover_channel_breakout.py --window 120 --k 2.0
-
-# 上证综指
-uv run python plots/turnover_channel_breakout.py --code 000001
-```
-
-| 参数 | 说明 | 默认 |
-|------|------|------|
-| `--index-dir` | 指数 parquet 父目录 | /mnt/dataset/index_quote_history |
-| `--code` | 指数代码 | 000300（沪深300） |
-| `--start-date` | 起始日期 | 2010-01-01 |
-| `--window` | 通道 MA 窗口 | 60 |
-| `--k` | 通道宽度（log 空间 σ 倍数） | 2.0 |
-| `--zigzag` | 价格 ZigZag 反转阈值 | 0.08（8%） |
-| `--max-look` | 评估找 pivot 最大搜索半径（交易日） | 120 |
-| `--output` | 输出 PNG 路径 | /mnt/dataset/turnover_channel_{code}.png |
-
-**输出：** 双面板 PNG（上=价格+ZigZag枢轴+重入信号虚线，下=成交额+通道+外溢日+重入信号）+ 控制台 pivot 距离汇总。
-
-**分析结果（MA120±2σ，沪深300，2010-2026）：**
-- sell 信号 93 次：距最近 H pivot 中位 +10 日（价格中位 +3.89%，信号偏早），≤15 日命中 53%
-- buy 信号 66 次：距最近 L pivot 中位 +11 日（价格中位 -3.94%），≤15 日命中 52%
-- 信号普遍早于价格极端点，符合「成交额先行」直觉
-
-### zigzag_annual_return — ZigZag 枢轴每年最大做多收益率（沪深300）
-
-用 ZigZag（15% 阈值）标记沪深300 阶段高/低点，提取 L→H 上升段并按日历年边界切分，算每年最大做多收益率。完整文档与年度明细见 [`plots/zigzag_annual_return.md`](plots/zigzag_annual_return.md)。
+| industry_heatmap | 行业成交额-涨幅方块热力图（finviz 风格，全 A 股聚合） | [文档](plots/industry_heatmap.md) |
+| industry_turnover_stack | 行业成交额占比 river 图（streamgraph，时序） | [文档](plots/industry_turnover_stack.md) |
+| turnover_channel_breakout | 成交额通道重入信号（沪深300，log Bollinger + ZigZag 评估） | [文档](plots/turnover_channel_breakout.md) |
+| zigzag_annual_return | ZigZag 枢轴每年最大做多收益率（沪深300） | [文档](plots/zigzag_annual_return.md) |
 
 ---
 
