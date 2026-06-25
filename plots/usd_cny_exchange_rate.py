@@ -118,6 +118,12 @@ def main() -> None:
     ax_bot.xaxis.set_major_locator(mdates.YearLocator(2))
     ax_bot.xaxis.set_major_formatter(mdates.DateFormatter("%Y"))
 
+    span = dates[-1] - dates[0]
+    ax_bot.set_xlim(dates[0], dates[-1] + span * 0.02)
+    ax_bot.text(0.99, 0.03, f"最新 {dates[-1]}", transform=ax_bot.transAxes,
+                ha="right", va="bottom", fontsize=10, color="#222", fontweight="bold",
+                bbox=dict(boxstyle="round,pad=0.3", fc="white", ec="#bbb", alpha=0.85))
+
     output = args.output or Path("/mnt/dataset/usd_cny_exchange_rate.png")
     output.parent.mkdir(parents=True, exist_ok=True)
     fig.savefig(output, dpi=200, bbox_inches="tight", facecolor="white")

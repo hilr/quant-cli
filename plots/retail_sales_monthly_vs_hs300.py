@@ -83,7 +83,12 @@ def plot(d: pl.DataFrame, hs300: pl.DataFrame, output_png: Path) -> None:
     lr2, lnr2 = axr2.get_legend_handles_labels()
     ax_yoy.legend(ll2 + lr2, lnl2 + lnr2, loc="upper left", fontsize=9)
 
-    ax_yoy.set_xlim(date(2007, 1, 1), d["date"].max())
+    dates = d["date"].to_list()
+    span = dates[-1] - dates[0]
+    ax_yoy.set_xlim(date(2007, 1, 1), dates[-1] + span * 0.02)
+    ax_yoy.text(0.99, 0.03, f"最新 {dates[-1]}", transform=ax_yoy.transAxes,
+                ha="right", va="bottom", fontsize=10, color="#222", fontweight="bold",
+                bbox=dict(boxstyle="round,pad=0.3", fc="white", ec="#bbb", alpha=0.85))
     ax_yoy.xaxis.set_major_locator(mdates.YearLocator(2))
     ax_yoy.xaxis.set_major_formatter(mdates.DateFormatter("%Y"))
     fig.autofmt_xdate()

@@ -274,7 +274,11 @@ def main() -> None:
         ax_bot.axvline(dates[i], color="#2ca02c", lw=0.6, alpha=0.6,
                        linestyle="--", zorder=2)
 
-    ax_bot.set_xlim(dates[0], dates[-1])
+    span = dates[-1] - dates[0]
+    ax_bot.set_xlim(dates[0], dates[-1] + span * 0.02)
+    ax_bot.text(0.99, 0.03, f"最新 {dates[-1]}", transform=ax_bot.transAxes,
+                ha="right", va="bottom", fontsize=10, color="#222", fontweight="bold",
+                bbox=dict(boxstyle="round,pad=0.3", fc="white", ec="#bbb", alpha=0.85))
     ax_bot.set_title(
         f"沪深300成交额 + 通道 MA{args.window}±{args.k}σ（log 空间）+ 所有外溢日 + 重入信号（虚线）",
         fontsize=11, fontweight="bold", loc="left",
