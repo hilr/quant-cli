@@ -69,6 +69,22 @@
 |------|------|------|
 | industry_heatmap | 行业成交额-涨幅方块热力图（finviz 风格，全 A 股聚合） | [文档](plots/industry_heatmap.md) |
 | industry_turnover_stack | 行业成交额占比 river 图（streamgraph，时序） | [文档](plots/industry_turnover_stack.md) |
+| ppi_vs_hs300 | PPI 出厂价格指数同比 vs 沪深300（双轴） | [文档](plots/ppi_vs_hs300.md) |
+| purchase_price_vs_hs300 | 购进价格指数同比 vs 沪深300（双轴） | [文档](plots/purchase_price_vs_hs300.md) |
+| retail_sales_monthly_vs_hs300 | 社零滚12月合计及同比 vs 沪深300（双轴） | [文档](plots/retail_sales_monthly_vs_hs300.md) |
+| power_generation_12m_vs_hs300 | 发电量滚12月合计同比 vs 沪深300（双轴） | [文档](plots/power_generation_12m_vs_hs300.md) |
+| trade_surplus_rolling_yoy | 进出口顺差滚12月合计及同比 vs 沪深300（双轴） | [文档](plots/trade_surplus_rolling_yoy.md) |
+| industry_profit_ttm | 工业企业利润 TTM 环比变动 vs 沪深300（双轴） | [文档](plots/industry_profit_ttm.md) |
+| loans_m2_12m_flow_vs_hs300 | 各项贷款增量 − M2 增量（12月）vs 沪深300 | [文档](plots/loans_m2_12m_flow_vs_hs300.md) |
+| m2_12m_increment | M1（老口径）/M2 货币12月新增额 vs 沪深300（双轴） | [文档](plots/m2_12m_increment.md) |
+| pbc_total_assets_12m_increment | 央行总资产12月增量 vs 沪深300（双轴） | [文档](plots/pbc_total_assets_12m_increment.md) |
+| shibor_vs_hs300 | SHIBOR 3M 银行间利率 vs 沪深300（双轴） | [文档](plots/shibor_vs_hs300.md) |
+| overseas_rmb_assets_12m_increment | 外资持有境内股/债12月新增额 vs 沪深300 | [文档](plots/overseas_rmb_assets_12m_increment.md) |
+| usd_cny_exchange_rate | 人民币兑美元汇率（月度中间价）vs 沪深300（双轴） | [文档](plots/usd_cny_exchange_rate.md) |
+| margin_balance_change | 融资余额月度净增长 vs 沪深300（最近5年） | [文档](plots/margin_balance_change.md) |
+| margin_inflow_20d | 融资余额20日净流入 vs 沪深300（最近5年，日频） | [文档](plots/margin_inflow_20d.md) |
+| turnover_concentration | A股日成交额集中度（5算法）vs 沪深300 | [文档](plots/turnover_concentration.md) |
+| channel_entries_on_hs300 | 红利低波ETF通道买入点叠加在沪深300日线上 | [文档](plots/channel_entries_on_hs300.md) |
 | turnover_channel_breakout | 成交额通道重入信号（沪深300，log Bollinger + ZigZag 评估） | [文档](plots/turnover_channel_breakout.md) |
 | zigzag_annual_return | ZigZag 枢轴每年潜在最大收益与潜在最大损失（沪深300） | [文档](plots/zigzag_annual_return.md) |
 | zigzag_bull_bear_cycle | ZigZag 枢轴牛熊周期（沪深300，段数/涨跌/历时） | [文档](plots/zigzag_bull_bear_cycle.md) |
