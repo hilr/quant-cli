@@ -117,7 +117,11 @@ def plot(d: pl.DataFrame, hs300: pl.DataFrame, output_png: Path) -> None:
     lr, lnr = axr.get_legend_handles_labels()
     ax.legend(ll + lr, lnl + lnr, loc="upper left", fontsize=9)
 
-    ax.set_xlim(date(1995, 1, 1), dates.max())
+    span = dates[-1] - dates[0]
+    ax.set_xlim(date(1995, 1, 1), dates[-1] + span * 0.02)
+    ax.text(0.99, 0.03, f"最新 {dates[-1]}", transform=ax.transAxes,
+            ha="right", va="bottom", fontsize=10, color="#222", fontweight="bold",
+            bbox=dict(boxstyle="round,pad=0.3", fc="white", ec="#bbb", alpha=0.85))
     ax.xaxis.set_major_locator(mdates.YearLocator(2))
     ax.xaxis.set_major_formatter(mdates.DateFormatter("%Y"))
     fig.autofmt_xdate()

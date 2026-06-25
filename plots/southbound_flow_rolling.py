@@ -149,6 +149,12 @@ def plot(sb: pl.DataFrame, etf: pl.DataFrame, output_png: Path) -> None:
     ax_bot.xaxis.set_major_locator(mdates.YearLocator(1))
     ax_bot.xaxis.set_major_formatter(mdates.DateFormatter("%Y"))
 
+    span = dates[-1] - dates[0]
+    ax_bot.set_xlim(dates[0], dates[-1] + span * 0.02)
+    ax_bot.text(0.99, 0.03, f"最新 {dates[-1]}", transform=ax_bot.transAxes,
+                ha="right", va="bottom", fontsize=10, color="#222", fontweight="bold",
+                bbox=dict(boxstyle="round,pad=0.3", fc="white", ec="#bbb", alpha=0.85))
+
     # 总标题
     d0 = d_min.strftime("%Y-%m-%d")
     d1 = d_max.strftime("%Y-%m-%d")

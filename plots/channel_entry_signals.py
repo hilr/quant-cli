@@ -125,6 +125,11 @@ def main() -> None:
     )
     ax.legend(loc="upper left", fontsize=9)
     ax.grid(True, alpha=0.3)
+    span = dates[-1] - dates[0]
+    ax.set_xlim(dates[0], dates[-1] + span * 0.02)
+    ax.text(0.99, 0.03, f"最新 {dates[-1]}", transform=ax.transAxes,
+            ha="right", va="bottom", fontsize=10, color="#222", fontweight="bold",
+            bbox=dict(boxstyle="round,pad=0.3", fc="white", ec="#bbb", alpha=0.85))
     ax.xaxis.set_major_locator(mdates.YearLocator())
     ax.xaxis.set_major_formatter(mdates.DateFormatter("%Y"))
 

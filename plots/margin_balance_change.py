@@ -141,6 +141,12 @@ def plot(margin: pl.DataFrame, hs300: pl.DataFrame, output_png: Path) -> None:
 
     ax_left.legend(handles=lines + [line_hs300], loc="upper left", fontsize=9, ncol=2)
 
+    span = dates[-1] - dates[0]
+    ax_left.set_xlim(dates[0], dates[-1] + span * 0.02)
+    ax_left.text(0.99, 0.03, f"最新 {dates[-1]}", transform=ax_left.transAxes,
+                 ha="right", va="bottom", fontsize=10, color="#222", fontweight="bold",
+                 bbox=dict(boxstyle="round,pad=0.3", fc="white", ec="#bbb", alpha=0.85))
+
     plt.tight_layout()
     output_png.parent.mkdir(parents=True, exist_ok=True)
     plt.savefig(output_png, dpi=120, bbox_inches="tight")

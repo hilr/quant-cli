@@ -74,7 +74,12 @@ def plot(d: pl.DataFrame, hs300: pl.DataFrame, output_png: Path) -> None:
     ax2.fill_between(d["date"], 0, d["同比%"], where=d["同比%"] < 0,
                      color="#1f77b4", alpha=0.15, interpolate=True)
     ax2.set_ylabel("滚12顺差合计 同比（%）")
-    ax2.set_xlim(date(2003, 1, 1), d["date"].max())
+    dates = d["date"].to_list()
+    span = dates[-1] - dates[0]
+    ax2.set_xlim(date(2003, 1, 1), dates[-1] + span * 0.02)
+    ax2.text(0.99, 0.03, f"最新 {dates[-1]}", transform=ax2.transAxes,
+             ha="right", va="bottom", fontsize=10, color="#222", fontweight="bold",
+             bbox=dict(boxstyle="round,pad=0.3", fc="white", ec="#bbb", alpha=0.85))
     ax2.set_ylim(-60, 130)
     ax2.grid(True, alpha=0.3)
     for x, lab in [(date(2008, 9, 1), "金融危机"), (date(2018, 7, 1), "贸易战"),

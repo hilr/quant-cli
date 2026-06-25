@@ -70,7 +70,11 @@ def plot(d: pl.DataFrame, hs300: pl.DataFrame, output: Path) -> None:
         axr.tick_params(axis="y", labelcolor="#888")
         axr.spines["right"].set_color("#bbb")
 
-    axes[-1].set_xlim(dates[0], dates[-1])
+    span = dates[-1] - dates[0]
+    axes[-1].set_xlim(dates[0], dates[-1] + span * 0.02)
+    axes[-1].text(0.99, 0.03, f"最新 {dates[-1]}", transform=axes[-1].transAxes,
+                  ha="right", va="bottom", fontsize=10, color="#222", fontweight="bold",
+                  bbox=dict(boxstyle="round,pad=0.3", fc="white", ec="#bbb", alpha=0.85))
     axes[-1].xaxis.set_major_locator(mdates.YearLocator())
     axes[-1].xaxis.set_major_formatter(mdates.DateFormatter("%Y"))
     axes[-1].xaxis.set_minor_locator(mdates.MonthLocator(bymonth=[4, 7, 10]))

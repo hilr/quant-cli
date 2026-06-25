@@ -84,7 +84,12 @@ def plot(d: pl.DataFrame, hs300: pl.DataFrame, output_png: Path) -> None:
         lines_r, labels_r = axr.get_legend_handles_labels()
         ax.legend(lines_l + lines_r, labels_l + labels_r, loc="upper left", fontsize=9)
 
-    ax_bond.set_xlim(date(2015, 1, 1), d["date"].max())
+    dates = d["date"].to_list()
+    span = dates[-1] - dates[0]
+    ax_bond.set_xlim(date(2015, 1, 1), dates[-1] + span * 0.02)
+    ax_bond.text(0.99, 0.03, f"最新 {dates[-1]}", transform=ax_bond.transAxes,
+                 ha="right", va="bottom", fontsize=10, color="#222", fontweight="bold",
+                 bbox=dict(boxstyle="round,pad=0.3", fc="white", ec="#bbb", alpha=0.85))
     ax_bond.xaxis.set_major_locator(mdates.YearLocator(1))
     ax_bond.xaxis.set_major_formatter(mdates.DateFormatter("%Y"))
     fig.autofmt_xdate()

@@ -136,7 +136,12 @@ def plot(p: pl.DataFrame, hs300: pl.DataFrame, output_png: Path) -> None:
     ax.set_ylabel("同比 %")
     axr.set_ylabel("沪深300", color="#2ca02c")
     axr.tick_params(axis="y", labelcolor="#2ca02c")
-    ax.set_xlim(date(2005, 1, 1), p["date"].max())
+    dates = p["date"].to_list()
+    span = dates[-1] - dates[0]
+    ax.set_xlim(date(2005, 1, 1), dates[-1] + span * 0.02)
+    ax.text(0.99, 0.03, f"最新 {dates[-1]}", transform=ax.transAxes,
+            ha="right", va="bottom", fontsize=10, color="#222", fontweight="bold",
+            bbox=dict(boxstyle="round,pad=0.3", fc="white", ec="#bbb", alpha=0.85))
     ax.grid(True, alpha=0.3)
 
     lines_l, labels_l = ax.get_legend_handles_labels()

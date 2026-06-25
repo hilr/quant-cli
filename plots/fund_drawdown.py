@@ -100,6 +100,12 @@ def plot(df: pl.DataFrame, code: str, output_png: Path) -> None:
     ax_dd.xaxis.set_major_locator(mdates.YearLocator())
     ax_dd.xaxis.set_major_formatter(mdates.DateFormatter("%Y"))
 
+    span = dates[-1] - dates[0]
+    ax_dd.set_xlim(dates[0], dates[-1] + span * 0.02)
+    ax_dd.text(0.99, 0.03, f"最新 {dates[-1]}", transform=ax_dd.transAxes,
+               ha="right", va="bottom", fontsize=10, color="#222", fontweight="bold",
+               bbox=dict(boxstyle="round,pad=0.3", fc="white", ec="#bbb", alpha=0.85))
+
     fig.suptitle(
         f"{code} — drawdown (peak = cummax high, trough = daily low)\n"
         f"max drawdown: {max_dd * 100:.2f}%",
