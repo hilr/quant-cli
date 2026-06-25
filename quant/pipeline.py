@@ -33,7 +33,6 @@ def build_stages(data_path: str, output_dir: str) -> list[list[Step]]:
             Step("fund_shares_history", convert_fund_shares, dict(data_path=data_path, output_dir=output_dir)),
             Step("fund_quote_history", convert_fund_quote, dict(data_path=data_path, output_dir=output_dir)),
             Step("index_quote_history", convert_index_quote, dict(data_path=data_path, output_dir=output_dir)),
-            Step("pbc_money_supply", convert_pbc_money_supply, dict(data_path=data_path, output_dir=output_dir)),
             Step("pbc_social_financing_flow", convert_pbc_social_financing_flow, dict(data_path=data_path, output_dir=output_dir)),
             Step("pbc_social_financing_stock", convert_pbc_social_financing_stock, dict(data_path=data_path, output_dir=output_dir)),
             Step("pbc_credit_funds", convert_pbc_credit_funds, dict(data_path=data_path, output_dir=output_dir)),
@@ -41,10 +40,12 @@ def build_stages(data_path: str, output_dir: str) -> list[list[Step]]:
             Step("gov_stat_trade", convert_gov_stat_trade, dict(data_path=data_path, output_dir=output_dir)),
             Step("gov_stat_retail_sales", convert_gov_stat_retail_sales, dict(data_path=data_path, output_dir=output_dir)),
         ],
-        # Stage 2: 前复权
+        # Stage 2: 前复权 + 货币供应量（依赖 Stage 1 的 pbc_credit_funds）
         [
             Step("stock_quote_adjusted", convert_adjust, dict(input_dir=f"{output_dir}/stock_quote_history", output_dir=f"{output_dir}/stock_quote_adjusted")),
             Step("fund_quote_adjusted", convert_fund_adjust, dict(input_dir=f"{output_dir}/fund_quote_history", output_dir=f"{output_dir}/fund_quote_adjusted")),
+            Step("pbc_money_supply", convert_pbc_money_supply,
+                 dict(data_path=data_path, output_dir=output_dir, credit_funds_csv=f"{output_dir}/pbc/credit_funds.csv")),
         ],
         # Stage 3: 衍生指标
         [
@@ -60,14 +61,72 @@ def build_stages(data_path: str, output_dir: str) -> list[list[Step]]:
     ]
 
 
+def build_equity_stages(data_path: str, output_dir: str) -> list[list[Step]]:
+    """股票链：stock_quote_history → stock_quote_adjusted → stock_quote_ta"""
+    return [
+        [Step("stock_quote_history", convert_stock_quote, dict(data_path=data_path, output_dir=output_dir))],
+        [Step("stock_quote_adjusted", convert_adjust, dict(input_dir=f"{output_dir}/stock_quote_history", output_dir=f"{output_dir}/stock_quote_adjusted"))],
+        [Step("stock_quote_ta", convert_ta, dict(input_dir=f"{output_dir}/stock_quote_adjusted", output_dir=f"{output_dir}/stock_quote_ta"))],
+    ]
+
+
+def build_index_stages(data_path: str, output_dir: str) -> list[list[Step]]:
+    """指数链：index_quote_history → index_quote_ta"""
+    return [
+        [Step("index_quote_history", convert_index_quote, dict(data_path=data_path, output_dir=output_dir))],
+        [Step("index_quote_ta", convert_index_ta, dict(input_dir=f"{output_dir}/index_quote_history", output_dir=f"{output_dir}/index_quote_ta"))],
+    ]
+
+
+def build_fund_stages(data_path: str, output_dir: str) -> list[list[Step]]:
+    """基金链：fund_shares + fund_quote → fund_quote_adjusted → fund_flow + fund_hs300_correlation"""
+    return [
+        [
+            Step("fund_shares_history", convert_fund_shares, dict(data_path=data_path, output_dir=output_dir)),
+            Step("fund_quote_history", convert_fund_quote, dict(data_path=data_path, output_dir=output_dir)),
+        ],
+        [Step("fund_quote_adjusted", convert_fund_adjust, dict(input_dir=f"{output_dir}/fund_quote_history", output_dir=f"{output_dir}/fund_quote_adjusted"))],
+        [
+            Step("fund_flow", convert_fund_flow, dict(shares_dir=f"{output_dir}/fund_shares_history", quote_dir=f"{output_dir}/fund_quote_adjusted", output_dir=f"{output_dir}/fund_flow")),
+            Step("fund_hs300_correlation", convert_fund_hs300_correlation, dict(input_dir=f"{output_dir}/fund_quote_adjusted", output_dir=f"{output_dir}/fund_hs300_correlation")),
+        ],
+    ]
+
+
+def build_margin_stages(data_path: str, output_dir: str) -> list[list[Step]]:
+    """融资融券链：margin_trade_history → margin_trade_daily"""
+    return [
+        [Step("margin_trade_history", convert_margin_trade, dict(data_path=data_path, output_dir=output_dir))],
+        [Step("margin_trade_daily", convert_margin_trade_daily, dict(input_dir=f"{output_dir}/margin_trade_history", output_dir=f"{output_dir}/margin_trade_daily"))],
+    ]
+
+
+def build_macro_stages(data_path: str, output_dir: str) -> list[list[Step]]:
+    """宏观数据集：PBC + gov_stat。pbc_money_supply 依赖 pbc_credit_funds 的输出，故分两 stage"""
+    credit_csv = f"{output_dir}/pbc/credit_funds.csv"
+    return [
+        [
+            Step("pbc_credit_funds", convert_pbc_credit_funds, dict(data_path=data_path, output_dir=output_dir)),
+            Step("pbc_social_financing_flow", convert_pbc_social_financing_flow, dict(data_path=data_path, output_dir=output_dir)),
+            Step("pbc_social_financing_stock", convert_pbc_social_financing_stock, dict(data_path=data_path, output_dir=output_dir)),
+            Step("pbc_central_bank_balance_sheet", convert_pbc_central_bank_balance_sheet, dict(data_path=data_path, output_dir=output_dir)),
+            Step("gov_stat_trade", convert_gov_stat_trade, dict(data_path=data_path, output_dir=output_dir)),
+            Step("gov_stat_retail_sales", convert_gov_stat_retail_sales, dict(data_path=data_path, output_dir=output_dir)),
+        ],
+        [Step("pbc_money_supply", convert_pbc_money_supply,
+              dict(data_path=data_path, output_dir=output_dir, credit_funds_csv=credit_csv))],
+    ]
+
+
 def run_step(step: Step) -> int:
     """执行单个步骤（供进程池调用）"""
     return step.func(**step.kwargs)
 
 
-def run_pipeline(stages: list[list[Step]], workers: int = 2, console=None) -> None:
+def run_pipeline(stages: list[list[Step]], workers: int = 2,
+                 console=None, stage_names: list[str] | None = None) -> None:
     """逐 stage 执行，每 stage 内并行"""
-    stage_names = [
+    default_names = [
         "原始数据 → 历史数据",
         "前复权",
         "衍生指标",
@@ -75,7 +134,12 @@ def run_pipeline(stages: list[list[Step]], workers: int = 2, console=None) -> No
     ]
 
     for stage_idx, stage in enumerate(stages):
-        name = stage_names[stage_idx] if stage_idx < len(stage_names) else f"Stage {stage_idx + 1}"
+        if stage_names and stage_idx < len(stage_names):
+            name = stage_names[stage_idx]
+        elif stage_idx < len(default_names):
+            name = default_names[stage_idx]
+        else:
+            name = f"Stage {stage_idx + 1}"
         if console:
             console.print(f"\n[bold cyan]Stage {stage_idx + 1}: {name}[/bold cyan]")
 

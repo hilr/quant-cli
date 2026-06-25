@@ -23,24 +23,101 @@ from quant.filter import (filter_volume_spike as run_filter_volume_spike,
                           filter_by_tags as run_filter_by_tags,
                           filter_limit_up_pullback as run_filter_limit_up_pullback)
 from quant.tags import TAG_FUNCS
-from quant.pipeline import build_stages, run_pipeline
+from quant.pipeline import (
+    build_stages, build_equity_stages, build_index_stages,
+    build_fund_stages, build_margin_stages, build_macro_stages, run_pipeline,
+)
 from quant.strategy import run_momentum_strategy, run_ma_crossover_strategy
 
 console = Console()
 cli = typer.Typer(name="quant", help="命令行量化工具")
 
 
-@cli.command()
-def refresh(
+refresh_app = typer.Typer(help="按数据域分组刷新数据集（按依赖拓扑排序并行）")
+cli.add_typer(refresh_app, name="refresh")
+
+
+@refresh_app.command("all")
+def refresh_all(
     data_path: str = "/mnt/readonly_dataset",
     output_dir: str = "/mnt/dataset",
     workers: int = 2,
 ) -> None:
-    """按依赖拓扑排序并行刷新全部数据集"""
-    console.print(f"[cyan]开始刷新数据集（workers={workers}）...[/cyan]")
+    """刷新全部数据集（按依赖拓扑排序并行）"""
+    console.print(f"[cyan]开始刷新全部数据集（workers={workers}）...[/cyan]")
     stages = build_stages(data_path=data_path, output_dir=output_dir)
     run_pipeline(stages, workers=workers, console=console)
     console.print(f"\n[green]全部数据集刷新完成[/green]")
+
+
+@refresh_app.command("equity")
+def refresh_equity(
+    data_path: str = "/mnt/readonly_dataset",
+    output_dir: str = "/mnt/dataset",
+    workers: int = 2,
+) -> None:
+    """刷新股票链：stock_quote_history → stock_quote_adjusted → stock_quote_ta"""
+    console.print(f"[cyan]刷新股票数据（workers={workers}）...[/cyan]")
+    stages = build_equity_stages(data_path=data_path, output_dir=output_dir)
+    run_pipeline(stages, workers=workers, console=console,
+                 stage_names=["原始数据 → 历史数据", "前复权", "衍生指标"])
+    console.print(f"\n[green]股票数据刷新完成[/green]")
+
+
+@refresh_app.command("index")
+def refresh_index(
+    data_path: str = "/mnt/readonly_dataset",
+    output_dir: str = "/mnt/dataset",
+    workers: int = 2,
+) -> None:
+    """刷新指数链：index_quote_history → index_quote_ta"""
+    console.print(f"[cyan]刷新指数数据（workers={workers}）...[/cyan]")
+    stages = build_index_stages(data_path=data_path, output_dir=output_dir)
+    run_pipeline(stages, workers=workers, console=console,
+                 stage_names=["原始数据 → 历史数据", "衍生指标"])
+    console.print(f"\n[green]指数数据刷新完成[/green]")
+
+
+@refresh_app.command("fund")
+def refresh_fund(
+    data_path: str = "/mnt/readonly_dataset",
+    output_dir: str = "/mnt/dataset",
+    workers: int = 2,
+) -> None:
+    """刷新基金链：fund_shares + fund_quote → fund_quote_adjusted → fund_flow + fund_hs300_correlation"""
+    console.print(f"[cyan]刷新基金数据（workers={workers}）...[/cyan]")
+    stages = build_fund_stages(data_path=data_path, output_dir=output_dir)
+    run_pipeline(stages, workers=workers, console=console,
+                 stage_names=["原始数据 → 历史数据", "前复权", "聚合数据"])
+    console.print(f"\n[green]基金数据刷新完成[/green]")
+
+
+@refresh_app.command("margin")
+def refresh_margin(
+    data_path: str = "/mnt/readonly_dataset",
+    output_dir: str = "/mnt/dataset",
+    workers: int = 2,
+) -> None:
+    """刷新融资融券链：margin_trade_history → margin_trade_daily"""
+    console.print(f"[cyan]刷新融资融券数据（workers={workers}）...[/cyan]")
+    stages = build_margin_stages(data_path=data_path, output_dir=output_dir)
+    run_pipeline(stages, workers=workers, console=console,
+                 stage_names=["原始数据 → 历史数据", "聚合数据"])
+    console.print(f"\n[green]融资融券数据刷新完成[/green]")
+
+
+@refresh_app.command("macro")
+def refresh_macro(
+    data_path: str = "/mnt/readonly_dataset",
+    output_dir: str = "/mnt/dataset",
+    workers: int = 2,
+) -> None:
+    """刷新宏观数据集（PBC + gov_stat，全部独立并行）"""
+    console.print(f"[cyan]刷新宏观数据（workers={workers}）...[/cyan]")
+    stages = build_macro_stages(data_path=data_path, output_dir=output_dir)
+    run_pipeline(stages, workers=workers, console=console,
+                 stage_names=["原始数据 → 历史数据", "货币供应量（依赖信贷收支）"])
+    console.print(f"\n[green]宏观数据刷新完成[/green]")
 
 
 @cli.command()
