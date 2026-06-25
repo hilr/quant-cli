@@ -1,10 +1,11 @@
-"""沪深两融融资余额滚动 N 个月净增长 vs 沪深300 双轴图。
+"""沪深两融融资余额月度净增长 vs 沪深300 双轴图（最近 5 年）。
 
 数据源：/mnt/readonly_dataset/eastmoney/margin_trade_total_history/{bse,sse,szse}/{year}.csv.gz
 将 bse/sse/sze 三个交易所的 margin_buy_total（融资余额）按日汇总求和，取每个月最后一个交易日，
-然后对月度序列做 N 个月差分（balance[M] - balance[M-N]），得到滚动 N 个月的净增长额。
+然后对月度序列做差分（balance[M] - balance[M-1]），得到月度净增长额。
 
-3 条曲线：滚动 3M / 6M / 12M 净增长（左轴，亿元），CSI300 月末收盘（右轴）。
+默认 1 条曲线：月度净增长（左轴，亿元），CSI300 月末收盘（右轴）。
+改 WINDOWS 常量可叠加多个滚动窗口（如 [3,6,12]）。
 """
 from __future__ import annotations
 
