@@ -1,13 +1,14 @@
-"""基金/ETF 历史回撤水下曲线 + 前复权价格（上下两栏）。
+"""历史回撤水下曲线 + 前复权价格（上下两栏）。
 
+基金/指数/股票通用：只要 --adjusted-dir 指向含 {code}.parquet 的 OHLC 行情目录即可。
 峰值 = 截至当日为止的历史最高价（cummax(high)）；
 回撤 = 当日最低价 / 历史最高价 - 1。
-
-数据源：/mnt/dataset/fund_quote_adjusted/{code}.parquet（前复权，避免分红制造假回撤）。
+前复权价格可避免分红制造假回撤（指数无分红则无需前复权）。
 """
 from __future__ import annotations
 
 import argparse
+from datetime import date
 from pathlib import Path
 
 import matplotlib.dates as mdates
@@ -18,12 +19,16 @@ import polars as pl
 ANNOT_THRESHOLD = -0.15
 
 
-def load_fund(adjusted_dir: Path, code: str) -> pl.DataFrame:
+def load_quote(adjusted_dir: Path, code: str, start_date: date | None = None) -> pl.DataFrame:
     df = (
         pl.read_parquet(adjusted_dir / f"{code}.parquet")
         .with_columns(pl.col("date").str.to_date("%Y-%m-%d"))
         .sort("date")
-        .with_columns(pl.col("high").cum_max().alias("peak_high"))
+    )
+    if start_date is not None:
+        df = df.filter(pl.col("date") >= start_date)
+    df = (
+        df.with_columns(pl.col("high").cum_max().alias("peak_high"))
         .with_columns((pl.col("low") / pl.col("peak_high") - 1).alias("dd"))
     )
     return df
@@ -126,7 +131,7 @@ def plot(df: pl.DataFrame, code: str, output_png: Path) -> None:
 
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--code", default="512890", help="基金/ETF 代码")
+    parser.add_argument("--code", default="512890", help="标的代码（基金/指数/股票）")
     parser.add_argument(
         "--adjusted-dir", type=Path,
         default=Path("/mnt/dataset/fund_quote_adjusted"),
@@ -136,10 +141,15 @@ def main() -> None:
         "--output", type=Path, default=None,
         help="输出 PNG 路径（默认 /mnt/dataset/drawdown_{code}.png）",
     )
+    parser.add_argument(
+        "--start-date", type=str, default=None,
+        help="起始日期 YYYY-MM-DD（cummax 从该日期起累计，默认从最早数据起）",
+    )
     args = parser.parse_args()
 
     output = args.output or Path(f"/mnt/dataset/drawdown_{args.code}.png")
-    df = load_fund(args.adjusted_dir, args.code)
+    start = date.fromisoformat(args.start_date) if args.start_date else None
+    df = load_quote(args.adjusted_dir, args.code, start)
     plot(df, args.code, output)
 
 
