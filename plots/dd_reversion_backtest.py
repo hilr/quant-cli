@@ -1,8 +1,8 @@
 """回撤均值回归策略回测（探索版）。
 
-回撤口径（注意与 fund_drawdown.py 不同）：
+回撤口径（注意与 drawdown.py 不同）：
   - 策略用收盘价口径：dd = close / rolling_max(close, window) - 1
-  - 这样 dd = 0 即「创滚动新高」，出场信号自然成立；fund_drawdown.py 的
+  - 这样 dd = 0 即「创滚动新高」，出场信号自然成立；drawdown.py 的
     「最低价 / cummax(最高价)」是可视化用的最坏情形口径，不适合做出场触发。
 
 信号（T-1 决定 T 持仓，避免未来函数）：

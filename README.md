@@ -89,6 +89,7 @@
 | zigzag_annual_return | ZigZag 枢轴每年潜在最大收益与潜在最大损失（沪深300） | [文档](plots/zigzag_annual_return.md) |
 | zigzag_bull_bear_cycle | ZigZag 枢轴牛熊周期（沪深300，段数/涨跌/历时） | [文档](plots/zigzag_bull_bear_cycle.md) |
 | annual_volatility | 沪深300 每年年化波动率 + 指数对照 | [文档](plots/annual_volatility.md) |
+| drawdown | 历史回撤水下曲线 + 前复权价格（基金/指数/股票通用，支持 --start-date 重置峰值） | [文档](plots/drawdown.md) |
 
 ---
 
