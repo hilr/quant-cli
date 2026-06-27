@@ -46,6 +46,9 @@
 | gov_stat/trade | 生成 | 海关进出口月度指标（长表） | [文档](docs/datasets/gov_stat_trade.md) |
 | gov_stat/retail_sales | 生成 | 社会消费品零售总额月度指标（长表） | [文档](docs/datasets/gov_stat_retail_sales.md) |
 | gov_stat/retail_sales_monthly | 生成 | 社会消费品零售总额每月新增额（宽表，累计值差分） | [文档](docs/datasets/gov_stat_retail_sales_monthly.md) |
+| gov_stat/port_freight | 生成 | 全国港口货物吞吐量月度指标（长表，2019 起） | [文档](docs/datasets/gov_stat_port_freight.md) |
+| gov_stat/freight | 生成 | 货运量月度指标（长表，2005 起） | [文档](docs/datasets/gov_stat_freight.md) |
+| gov_stat/passenger | 生成 | 客运量月度指标（长表，2005 起） | [文档](docs/datasets/gov_stat_passenger.md) |
 | stock_quote_history | 生成 | 股票行情历史 | [文档](docs/datasets/stock_quote_history.md) |
 | stock_quote_adjusted | 生成 | 前复权行情 | [文档](docs/datasets/stock_quote_adjusted.md) |
 | stock_quote_ta | 生成 | 技术指标 | [文档](docs/datasets/stock_quote_ta.md) |
@@ -73,6 +76,9 @@
 | purchase_price_vs_hs300 | 购进价格指数同比 vs 沪深300（双轴） | [文档](plots/purchase_price_vs_hs300.md) |
 | retail_sales_monthly_vs_hs300 | 社零滚12月合计及同比 vs 沪深300（双轴） | [文档](plots/retail_sales_monthly_vs_hs300.md) |
 | power_generation_12m_vs_hs300 | 发电量滚12月合计同比 vs 沪深300（双轴） | [文档](plots/power_generation_12m_vs_hs300.md) |
+| passenger_vs_hs300 | 客运量（铁路+民航）滚12月合计/同比/环比 vs 沪深300（3 panel） | [文档](plots/passenger_vs_hs300.md) |
+| freight_vs_hs300 | 货运量（铁路+水运）滚12月合计/同比/环比 vs 沪深300（3 panel） | [文档](plots/freight_vs_hs300.md) |
+| port_freight_vs_hs300 | 港口吞吐量（全国港口+外贸）滚12月合计/同比/环比 vs 沪深300（3 panel） | [文档](plots/port_freight_vs_hs300.md) |
 | trade_surplus_rolling_yoy | 进出口顺差滚12月合计及同比 vs 沪深300（双轴） | [文档](plots/trade_surplus_rolling_yoy.md) |
 | industry_profit_ttm | 工业企业利润 TTM 环比变动 vs 沪深300（双轴） | [文档](plots/industry_profit_ttm.md) |
 | loans_m2_12m_flow_vs_hs300 | 各项贷款增量 − M2 增量（12月）vs 沪深300 | [文档](plots/loans_m2_12m_flow_vs_hs300.md) |
@@ -424,11 +430,16 @@ uv run python plots/channel_entry_signals.py --code 512890 --window 120 --k 1.5 
 ┌─────────────────────────────────────────────────────────────────┐
 │                      统计局月度指标数据流                        │
 ├─────────────────────────────────────────────────────────────────┤
-│  gov_stats/{工业企业指标,进出口,社会消费品零售总额}/{year}.{csv,xlsx} │
-│       ↓  (月份列乱序/倒序，按列名 'YYYY年M月' 解析；指标×月份宽表转长表) │
+│  gov_stats/{工业企业指标,进出口,社会消费品零售总额,             │
+│             全国港口货物吞吐量,货运量,客运量}/{year}.{csv,xlsx}  │
+│       ↓  (月份列乱序/倒序，按列名 'YYYY年M月' 解析；指标×月份宽表转长表； │
+│          1-2 月合并缺口按当期[2月]是否已发布决定平摊/反推)        │
 │  gov_stat/  industry_profit  (利润累计→当月差分，每年一文件)     │
 │             trade             (进出口，千美元/%)                 │
 │             retail_sales      (消费品零售，亿元/%)              │
+│             port_freight      (港口吞吐量，万吨，2019+)          │
+│             freight           (货运量，万吨，2005+)              │
+│             passenger         (客运量，万人，2005+)              │
 └─────────────────────────────────────────────────────────────────┘
 
 ┌─────────────────────────────────────────────────────────────────┐

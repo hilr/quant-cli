@@ -2204,9 +2204,15 @@ def _gov_stat_parse_indicator_table(path: Path) -> list[tuple[str, str, float]]:
 
 
 def _gov_stat_fill_jan_feb(df: pl.DataFrame) -> pl.DataFrame:
-    """对「当期值」指标，用 2 月累计值的一半补全 1、2 月当期值缺失（统计局 1-2 月
-    合并发布所致）。按 indicator 名自动配对：含「当期值」的，配对其「累计值」变体。
-    合计平分：1 月 = 2 月累计 / 2，2 月 = 2 月累计 / 2（与官方累计值自洽）。
+    """对「当期值」指标，补全 1、2 月当期值缺失（统计局 1-2 月合并发布所致）。
+    按 indicator 名自动配对：含「当期值」的，配对其「累计值」变体。
+
+    两种填补规则（按 2 月当期值是否已发布自动选择）：
+    - **平摊**（2024-2025 纯合并）：当期[1月]、当期[2月] 都空 → 各填 累计[2月] / 2。
+    - **反推**（2026 半合并）：当期[1月] 空、当期[2月] 有值 → Jan = 累计[2月] − 当期[2月]，
+      Feb 保留实际值。和校验自洽（Jan + Feb = 累计[2月]）。
+    - 2005-2023 分月发布：两月都有值，不动。
+
     仅补当期值；累计值/同比等列的 1 月仍按原始（2 月累计值原本就有）。"""
     indicators = df["indicator"].unique().to_list()
     pairs = [(ind, ind.replace("当期值", "累计值")) for ind in indicators
@@ -2223,11 +2229,21 @@ def _gov_stat_fill_jan_feb(df: pl.DataFrame) -> pl.DataFrame:
     wide = wide.with_columns(pl.col("date").dt.year().alias("_y"),
                              pl.col("date").dt.month().alias("_m"))
     for cur, acc in pairs:
-        feb = wide.filter(pl.col("_m") == 2).select("_y", pl.col(acc).alias("_feb"))
-        wide = wide.join(feb, on="_y", how="left")
-        cond = pl.col("_m").is_in([1, 2]) & pl.col(cur).is_null() & pl.col("_feb").is_not_null()
-        wide = wide.with_columns(pl.when(cond).then(pl.col("_feb") / 2).otherwise(pl.col(cur)).alias(cur))
-        wide = wide.drop("_feb")
+        # 2 月累计值（= 1+2 月合计）与 2 月当期值，按年份对齐到每一行
+        feb_acc = wide.filter(pl.col("_m") == 2).select("_y", pl.col(acc).alias("_feb_acc"))
+        feb_cur = wide.filter(pl.col("_m") == 2).select("_y", pl.col(cur).alias("_feb_cur"))
+        wide = wide.join(feb_acc, on="_y", how="left").join(feb_cur, on="_y", how="left")
+        # 平摊：1 或 2 月 + 当期空 + 2 月当期也空 + 2 月累计有
+        split = (pl.col("_m").is_in([1, 2]) & pl.col(cur).is_null()
+                 & pl.col("_feb_cur").is_null() & pl.col("_feb_acc").is_not_null())
+        # 反推：仅 1 月 + 当期空 + 2 月当期有 + 2 月累计有
+        derive = ((pl.col("_m") == 1) & pl.col(cur).is_null()
+                  & pl.col("_feb_cur").is_not_null() & pl.col("_feb_acc").is_not_null())
+        wide = wide.with_columns(
+            pl.when(split).then(pl.col("_feb_acc") / 2)
+            .when(derive).then(pl.col("_feb_acc") - pl.col("_feb_cur"))
+            .otherwise(pl.col(cur)).alias(cur))
+        wide = wide.drop("_feb_acc", "_feb_cur")
     ind_cols = [c for c in wide.columns if c not in ("date", "_y", "_m")]
     long = (wide.unpivot(on=ind_cols, index="date", variable_name="indicator", value_name="value")
                  .filter(pl.col("value").is_not_null())
@@ -2282,6 +2298,31 @@ def convert_gov_stat_retail_sales(data_path: str, output_dir: str) -> int:
     累计同比。源：gov_stats/社会消费品零售总额/{year}.{csv≤2024, xlsx≥2025}，2000 起。"""
     return _convert_gov_stat_monthly_indicators(
         data_path, output_dir, src_name="社会消费品零售总额", out_name="retail_sales")
+
+
+def convert_gov_stat_port_freight(data_path: str, output_dir: str) -> int:
+    """全国港口货物吞吐量月度指标（万吨 / %），长表 date/indicator/value。
+    指标含全国港口 / 外贸 / 沿海港口货物吞吐量各自的当期值、累计值、同比、累计增长。
+    源：gov_stats/全国港口货物吞吐量/{year}.xlsx，2019 起。"""
+    return _convert_gov_stat_monthly_indicators(
+        data_path, output_dir, src_name="全国港口货物吞吐量",
+        out_name="port_freight", year_start=2019)
+
+
+def convert_gov_stat_freight(data_path: str, output_dir: str) -> int:
+    """货运量月度指标（万吨 / %），长表 date/indicator/value。
+    指标含总 / 铁路 / 公路 / 水运 / 民航货运量各自的当期值、累计值、同比、累计增长。
+    源：gov_stats/货运量/{year}.xlsx，2005 起。"""
+    return _convert_gov_stat_monthly_indicators(
+        data_path, output_dir, src_name="货运量", out_name="freight", year_start=2005)
+
+
+def convert_gov_stat_passenger(data_path: str, output_dir: str) -> int:
+    """客运量月度指标（万人 / %），长表 date/indicator/value。
+    指标含总 / 铁路 / 公路 / 水运 / 民航客运量各自的当期值、累计值、同比、累计增长。
+    源：gov_stats/客运量/{year}.xlsx，2005 起。"""
+    return _convert_gov_stat_monthly_indicators(
+        data_path, output_dir, src_name="客运量", out_name="passenger", year_start=2005)
 
 
 def convert_gov_stat_retail_monthly(data_path: str, output_dir: str) -> int:

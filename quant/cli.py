@@ -14,6 +14,8 @@ from quant.convert import (convert_stock_quote, convert_margin_trade, convert_ad
                            convert_pbc_central_bank_balance_sheet, convert_pbc_exchange_rate,
                            convert_gov_stat_trade, convert_gov_stat_retail_sales,
                            convert_gov_stat_retail_monthly,
+                           convert_gov_stat_port_freight, convert_gov_stat_freight,
+                           convert_gov_stat_passenger,
                            convert_turnover_concentration,
                            convert_exchange_hkex_southbound_flow,
                            convert_index_adjust_history,
@@ -470,6 +472,48 @@ def gov_stat_retail_monthly(
     """
     console.print(f"[cyan]生成社会消费品零售总额每月新增额...[/cyan]")
     count = convert_gov_stat_retail_monthly(data_path=data_path, output_dir=output_dir)
+    console.print(f"[green]完成! 共 {count} 条记录[/green]")
+
+
+@cli.command()
+def gov_stat_port_freight(
+    data_path: str = "/mnt/readonly_dataset",
+    output_dir: str = "/mnt/dataset",
+) -> None:
+    """全国港口货物吞吐量月度指标（万吨 / %），长表 date/indicator/value，2019 起
+
+    指标含全国港口 / 外贸 / 沿海港口货物吞吐量各自的当期值、累计值、同比、累计增长。
+    """
+    console.print(f"[cyan]生成全国港口货物吞吐量数据...[/cyan]")
+    count = convert_gov_stat_port_freight(data_path=data_path, output_dir=output_dir)
+    console.print(f"[green]完成! 共 {count} 条记录[/green]")
+
+
+@cli.command()
+def gov_stat_freight(
+    data_path: str = "/mnt/readonly_dataset",
+    output_dir: str = "/mnt/dataset",
+) -> None:
+    """货运量月度指标（万吨 / %），长表 date/indicator/value，2005 起
+
+    指标含总 / 铁路 / 公路 / 水运 / 民航货运量各自的当期值、累计值、同比、累计增长。
+    """
+    console.print(f"[cyan]生成货运量数据...[/cyan]")
+    count = convert_gov_stat_freight(data_path=data_path, output_dir=output_dir)
+    console.print(f"[green]完成! 共 {count} 条记录[/green]")
+
+
+@cli.command()
+def gov_stat_passenger(
+    data_path: str = "/mnt/readonly_dataset",
+    output_dir: str = "/mnt/dataset",
+) -> None:
+    """客运量月度指标（万人 / %），长表 date/indicator/value，2005 起
+
+    指标含总 / 铁路 / 公路 / 水运 / 民航客运量各自的当期值、累计值、同比、累计增长。
+    """
+    console.print(f"[cyan]生成客运量数据...[/cyan]")
+    count = convert_gov_stat_passenger(data_path=data_path, output_dir=output_dir)
     console.print(f"[green]完成! 共 {count} 条记录[/green]")
 
 
