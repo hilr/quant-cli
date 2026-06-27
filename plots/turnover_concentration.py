@@ -99,8 +99,8 @@ def main() -> None:
                         default=Path("/mnt/dataset/index_quote_history/000300.parquet"))
     parser.add_argument("--output", type=Path,
                         default=Path("/mnt/dataset/turnover_concentration.png"))
-    parser.add_argument("--start-date", type=str, default=None,
-                        help="起始日期 YYYY-MM-DD")
+    parser.add_argument("--start-date", type=str, default="2000-01-01",
+                        help="起始日期（默认 2000-01-01；早期集中度样本少、噪音大）")
     parser.add_argument("--end-date", type=str, default=None,
                         help="结束日期 YYYY-MM-DD")
     args = parser.parse_args()

@@ -4,11 +4,11 @@
 
 | 项 | 内容 |
 |---|------|
-| 命令 | `uv run python -m quant.cli turnover-concentration --data-path <readonly> --output-dir <dataset> --start-year 2010` |
+| 命令 | `uv run python -m quant.cli turnover-concentration --data-path <readonly> --output-dir <dataset> [--start-year 1990]` |
 | 输入 | `{data_path}/finance_sina/stock_quote/{date}.csv`，缺失时回退 `{data_path}/eastmoney/stock_quote/{date}.csv` |
-| 输出 | `{output_dir}/turnover_concentration.csv`，宽表，2010-01-04 起 |
-| 完整性 | 当日 CSV 行数 ≥ 1000 才纳入（过滤半截/测试文件） |
-| 字段 | date, gini, alpha, top5_ratio, hhi, cr10, stock_count |
+| 输出 | `{output_dir}/turnover_concentration.csv`，宽表，1992-10-20 起（默认不截断，`--start-year` 可再收窄） |
+| 完整性 | 当日 CSV 行数 ≥ 50 才纳入（过滤半截/测试文件；现代年份无残缺抓取，门槛只影响早期小市场） |
+| 字段 | date, gini, alpha, top5_ratio, hhi, cr10, stock_count, free_float_market_cap_total, market_cap_total |
 
 ## 字段
 
@@ -21,6 +21,8 @@
 | hhi | HHI 赫芬达尔指数 | [0, 1] 无量纲，典型 0.001~0.005 | 头部集中（平方放大） | 分散 |
 | cr10 | 前 10 大成交额占比 | [0, 1] 无量纲，典型 0.05~0.12 | top10 虹吸 | top10 占比下降 |
 | stock_count | 当日 turnover > 0 的股票数 | 只 | — | — |
+| free_float_market_cap_total | 同口径（turnover>0）股票流通市值之和 | 元（作图除以 1e12 → 万亿） | — | — |
+| market_cap_total | 同口径（turnover>0）股票总市值之和 | 元（作图除以 1e12 → 万亿） | — | — |
 
 **集中度↑ 对大盘的含义：** 资金在少数票上抱团，风格偏向结构性行情；
 **集中度↓：** 资金分散到多数票，偏向普涨。
@@ -77,9 +79,11 @@ cr10 = Σ(top10 shares)
 
 ## 源数据坑
 
-- **早期 A 股股票数少**：2010 ~1700 只、2015 ~2400 只、2020 ~3800 只、2026 ~5400 只。
-  行数阈值定为 1000（而非 `industry_common.MIN_FULL_ROWS=4000`）以保留 2010 起的完整历史。
-  1000 已经足以保证 5 个集中度算法稳定收敛。
+- **早期 A 股股票数少**：1992 ~50 只、2000 ~1000 只、2010 ~1700 只、2015 ~2400 只、
+  2020 ~3800 只、2026 ~5400 只。行数阈值定为 50 以保留 1992 起的完整历史（早期全市场本身就 <1000 只）。
+  现代年份（2005+）最小文件均 >800 行、无残缺抓取，故 50 行门槛只影响早期。
+  注意早期（尤其 1992-2000）集中度算法在样本极少时噪音大，解读需谨慎；
+  `stock_count` / `market_cap` 等汇总列对任何年代都成立。
 - **CSV dtype 推断**：单日 CSV 的 `turnover` / `market_cap` 列在早期行若是纯整数，
   Polars 默认推断为 i64，遇到后面的浮点行会报解析错误。读取时显式设 `infer_schema_length=10000`
   让 Polars 看到足够多样本后再决定类型。
@@ -92,11 +96,10 @@ cr10 = Σ(top10 shares)
 ## 使用示例
 
 ```bash
-# 生成 2010 起的完整历史
+# 生成 1992 起的完整历史（默认不截断）
 uv run python -m quant.cli turnover-concentration \
     --data-path /mnt/readonly_dataset \
-    --output-dir /mnt/dataset \
-    --start-year 2010
+    --output-dir /mnt/dataset
 
 # 配套可视化：5 子图叠加沪深300
 uv run python plots/turnover_concentration.py \

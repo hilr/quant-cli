@@ -2359,9 +2359,9 @@ def convert_gov_stat_retail_monthly(data_path: str, output_dir: str) -> int:
 
 # 行情目录候选：finance_sina 是实时源（1992-），eastmoney 是历史归档（2022-2025 停更）。靠前的优先。
 _TURNOVER_QUOTE_DIRS = ["finance_sina/stock_quote", "eastmoney/stock_quote"]
-# 早期 A 股股票数少（2010 ~1700 只、2015 ~2400 只、2020 ~3800 只），用 1000 行阈值过滤
-# 半截/测试文件但保留 2010 起的完整历史
-_TURNOVER_MIN_ROWS = 1000
+# 早期 A 股股票数少（1992 ~50 只、2000 ~1000 只、2010 ~1700 只），用低阈值尽可能保留
+# 完整历史（1992 起）；现代年份无残缺抓取（2005+ 最小文件均 >800 行），50 行门槛只影响早期
+_TURNOVER_MIN_ROWS = 50
 
 
 def _concentration_metrics(x: np.ndarray) -> dict:
@@ -2399,9 +2399,9 @@ def _concentration_metrics(x: np.ndarray) -> dict:
 def convert_turnover_concentration(
     data_path: str = DEFAULT_DATA_PATH,
     output_dir: str = OUTPUT_DATA_PATH,
-    start_year: int = 2010,
+    start_year: int = 1990,
 ) -> int:
-    """全 A 股日成交额集中度（gini/alpha/top5-median/hhi/cr10），宽表，2010 起。"""
+    """全 A 股日成交额集中度（gini/alpha/top5-median/hhi/cr10）+ 股票数 + 流通/总市值，宽表。"""
     root = Path(data_path)
 
     # 扫所有候选目录的完整交易日，同日靠前目录优先
@@ -2437,10 +2437,16 @@ def convert_turnover_concentration(
             continue
         if "turnover" not in df.columns:
             continue
-        x = (df.filter(pl.col("turnover") > 0)["turnover"].to_numpy().astype(float))
+        df_t = df.filter(pl.col("turnover") > 0)
+        x = df_t["turnover"].to_numpy().astype(float)
         m = _concentration_metrics(x)
         m["date"] = dt
         m["stock_count"] = int(len(x))
+        # 流通/总市值（与 stock_count 同口径：turnover>0 的活跃股票之和；
+        # eastmoney 源无此列 → None，finance_sina 源才有）
+        for col in ("free_float_market_cap", "market_cap"):
+            m[f"{col}_total"] = (float(df_t[col].sum())
+                                 if col in df_t.columns else None)
         records.append(m)
         if (i + 1) % 200 == 0:
             print(f"  {i + 1}/{len(dates)}...")
@@ -2449,7 +2455,8 @@ def convert_turnover_concentration(
         raise RuntimeError("无有效数据")
 
     out_df = (pl.DataFrame(records)
-              .select(["date", "gini", "alpha", "top5_ratio", "hhi", "cr10", "stock_count"])
+              .select(["date", "gini", "alpha", "top5_ratio", "hhi", "cr10",
+                       "stock_count", "free_float_market_cap_total", "market_cap_total"])
               .sort("date"))
     out_path = Path(output_dir)
     out_path.mkdir(parents=True, exist_ok=True)
