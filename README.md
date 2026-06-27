@@ -84,6 +84,7 @@
 | margin_balance_change | 融资余额月度净增长 vs 沪深300（最近5年） | [文档](plots/margin_balance_change.md) |
 | margin_inflow_20d | 融资余额20日净流入 vs 沪深300（最近5年，日频） | [文档](plots/margin_inflow_20d.md) |
 | turnover_concentration | A股日成交额集中度（5算法）vs 沪深300 | [文档](plots/turnover_concentration.md) |
+| index_turnover_river | 沪深300/中证500/中证1000/其他 成交额占比 river 图（streamgraph） | [文档](plots/index_turnover_river.md) |
 | market_stock_count | 沪深两市股票数 / 流通市值 / 总市值 / 沪深300（三轴，日频） | [文档](plots/market_stock_count.md) |
 | hs300_turnover_share | 沪深300 成交额占两市总成交额比例 vs 沪深300（双轴，日频） | [文档](plots/hs300_turnover_share.md) |
 | market_turnover_total | 沪深两市总成交额（日频）vs 沪深300（双轴，可 log） | [文档](plots/market_turnover_total.md) |
