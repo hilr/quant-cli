@@ -477,9 +477,9 @@ def gov_stat_retail_monthly(
 def turnover_concentration(
     data_path: str = "/mnt/readonly_dataset",
     output_dir: str = "/mnt/dataset",
-    start_year: int = 2010,
+    start_year: int = 1990,
 ) -> None:
-    """全 A 股日成交额集中度（gini/alpha/top5-median/hhi/cr10），宽表，2010 起"""
+    """全 A 股日成交额集中度（gini/alpha/top5-median/hhi/cr10）+ 股票数 + 流通/总市值，宽表"""
     console.print(f"[cyan]计算成交额集中度（{start_year} 起）...[/cyan]")
     count = convert_turnover_concentration(
         data_path=data_path, output_dir=output_dir, start_year=start_year)
