@@ -52,3 +52,5 @@ uv run python -m quant.cli gov-stat-freight --data-path /mnt/readonly_dataset --
 ```
 
 **关联：** [`gov_stat/port_freight`](gov_stat_port_freight.md)（港口吞吐量）、[`gov_stat/passenger`](gov_stat_passenger.md)（客运量）。
+
+**关联图表：** [`plots/freight_vs_hs300`](../../plots/freight_vs_hs300.md)——只取铁路 + 水运（吨位制，准确；公路 2014 有小幅调整不纳入），3 panel 看 12 月滚动合计水平 / 同比 / 环比 vs 沪深300。

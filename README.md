@@ -76,6 +76,9 @@
 | purchase_price_vs_hs300 | 购进价格指数同比 vs 沪深300（双轴） | [文档](plots/purchase_price_vs_hs300.md) |
 | retail_sales_monthly_vs_hs300 | 社零滚12月合计及同比 vs 沪深300（双轴） | [文档](plots/retail_sales_monthly_vs_hs300.md) |
 | power_generation_12m_vs_hs300 | 发电量滚12月合计同比 vs 沪深300（双轴） | [文档](plots/power_generation_12m_vs_hs300.md) |
+| passenger_vs_hs300 | 客运量（铁路+民航）滚12月合计/同比/环比 vs 沪深300（3 panel） | [文档](plots/passenger_vs_hs300.md) |
+| freight_vs_hs300 | 货运量（铁路+水运）滚12月合计/同比/环比 vs 沪深300（3 panel） | [文档](plots/freight_vs_hs300.md) |
+| port_freight_vs_hs300 | 港口吞吐量（全国港口+外贸）滚12月合计/同比/环比 vs 沪深300（3 panel） | [文档](plots/port_freight_vs_hs300.md) |
 | trade_surplus_rolling_yoy | 进出口顺差滚12月合计及同比 vs 沪深300（双轴） | [文档](plots/trade_surplus_rolling_yoy.md) |
 | industry_profit_ttm | 工业企业利润 TTM 环比变动 vs 沪深300（双轴） | [文档](plots/industry_profit_ttm.md) |
 | loans_m2_12m_flow_vs_hs300 | 各项贷款增量 − M2 增量（12月）vs 沪深300 | [文档](plots/loans_m2_12m_flow_vs_hs300.md) |

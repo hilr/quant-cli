@@ -49,3 +49,5 @@ uv run python -m quant.cli gov-stat-port-freight --data-path /mnt/readonly_datas
 ```
 
 **关联：** 同类口径还有 [`gov_stat/freight`](gov_stat_freight.md)（货运量）、[`gov_stat/passenger`](gov_stat_passenger.md)（客运量），均为交通运输部月度指标。
+
+**关联图表：** [`plots/port_freight_vs_hs300`](../../plots/port_freight_vs_hs300.md)——取全国港口 + 外贸（码头过磅称重，计量准确），3 panel 看 12 月滚动合计水平 / 同比 / 环比 vs 沪深300。
