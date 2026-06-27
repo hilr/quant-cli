@@ -84,6 +84,8 @@
 | margin_balance_change | 融资余额月度净增长 vs 沪深300（最近5年） | [文档](plots/margin_balance_change.md) |
 | margin_inflow_20d | 融资余额20日净流入 vs 沪深300（最近5年，日频） | [文档](plots/margin_inflow_20d.md) |
 | turnover_concentration | A股日成交额集中度（5算法）vs 沪深300 | [文档](plots/turnover_concentration.md) |
+| hs300_turnover_share | 沪深300 成交额占两市总成交额比例 vs 沪深300（双轴，日频） | [文档](plots/hs300_turnover_share.md) |
+| market_turnover_total | 沪深两市总成交额（日频）vs 沪深300（双轴，可 log） | [文档](plots/market_turnover_total.md) |
 | channel_entries_on_hs300 | 红利低波ETF通道买入点叠加在沪深300日线上 | [文档](plots/channel_entries_on_hs300.md) |
 | turnover_channel_breakout | 成交额通道重入信号（沪深300，log Bollinger + ZigZag 评估） | [文档](plots/turnover_channel_breakout.md) |
 | zigzag_annual_return | ZigZag 枢轴每年潜在最大收益与潜在最大损失（沪深300） | [文档](plots/zigzag_annual_return.md) |
