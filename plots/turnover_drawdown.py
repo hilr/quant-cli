@@ -1,11 +1,14 @@
 """沪深300 成交额回撤水下曲线 + 沪深300 收盘价（上下两栏）。
 
-峰值 = 截至当日为止 turnover 的历史最高（cummax）；
+峰值 = 过去 N 个交易日（默认 120）内 turnover 的最高（rolling max）；
 回撤 = turnover / peak_turnover - 1。
 
 下栏用红色面积显示成交额回撤水下曲线（%），上栏画沪深300 收盘价
 （含累计最高虚线）作为对照，看「量缩深」的时点是否对应价格低点，
 即成交额的「枯竭」是否预示价格拐点。
+
+用滚动窗口（而非 cummax）测峰值，可突出中期（~半年）成交萎缩，
+避免被早期历史天量长期压住。
 
 数据源：/mnt/dataset/index_quote_history/000300.parquet（含 turnover 列）。
 也适用于任何带 turnover 列的指数/基金/股票行情 parquet。
@@ -21,13 +24,16 @@ import matplotlib.pyplot as plt
 import polars as pl
 
 # 标注深度阈值（回撤深于该值的谷值会标日期 + 幅度）
-ANNOT_THRESHOLD = -0.50
+# 滚动窗口下 −50% 噪音太多（每隔几周就会出现），−80% 才是流动性枯竭级别的事件
+DEFAULT_THRESHOLD = -0.80
+# 滚动窗口（交易日）
+DEFAULT_WINDOW = 120
 
 
 def load_turnover(
-    adjusted_dir: Path, code: str, start_date: date | None = None
+    adjusted_dir: Path, code: str, window: int, start_date: date | None = None
 ) -> pl.DataFrame:
-    """读 {code}.parquet，过滤 turnover>0（剔除无成交的早期），按日 cum_max。"""
+    """读 {code}.parquet，过滤 turnover>0（剔除无成交的早期），按 rolling max 算峰值。"""
     df = (
         pl.read_parquet(adjusted_dir / f"{code}.parquet")
         .with_columns(pl.col("date").str.to_date("%Y-%m-%d"))
@@ -36,38 +42,42 @@ def load_turnover(
     )
     if start_date is not None:
         df = df.filter(pl.col("date") >= start_date)
-    df = df.with_columns(pl.col("turnover").cum_max().alias("peak_turnover")).with_columns(
-        (pl.col("turnover") / pl.col("peak_turnover") - 1).alias("dd")
+    df = (
+        df.with_columns(
+            pl.col("turnover").rolling_max(window_size=window, min_samples=1).alias("peak_turnover")
+        )
+        .with_columns((pl.col("turnover") / pl.col("peak_turnover") - 1).alias("dd"))
     )
     return df
 
 
 def find_troughs(df: pl.DataFrame, threshold: float) -> list[tuple]:
-    """按历史新高分段，取每段最深谷值；返回深于 threshold 的 (date, depth) 列表。"""
+    """连续低于 threshold 的段取最深谷值；返回 (date, depth) 列表。
+
+    滚动窗口下峰值非单调，不能用「创新高分段」；改为阈值穿越分段。
+    """
     dates = df["date"].to_list()
-    turnovers = df["turnover"].to_list()
-    peak = df["peak_turnover"].to_list()
-    prev_peak = [None] + peak[:-1]
+    dd = df["dd"].to_list()
 
     troughs = []
+    in_dip = False
     cur_lo_idx = 0
     for i in range(len(dates)):
-        is_start = (i == 0) or (prev_peak[i] is not None and turnovers[i] > prev_peak[i])
-        if is_start and i != 0:
-            d = turnovers[cur_lo_idx] / peak[cur_lo_idx] - 1
-            if d <= threshold:
-                troughs.append((dates[cur_lo_idx], d))
-            cur_lo_idx = i
-        if turnovers[i] < turnovers[cur_lo_idx]:
-            cur_lo_idx = i
-    # 末段
-    d = turnovers[cur_lo_idx] / peak[cur_lo_idx] - 1
-    if d <= threshold:
-        troughs.append((dates[cur_lo_idx], d))
+        if dd[i] <= threshold:
+            if not in_dip:
+                in_dip = True
+                cur_lo_idx = i
+            elif dd[i] < dd[cur_lo_idx]:
+                cur_lo_idx = i
+        elif in_dip:
+            troughs.append((dates[cur_lo_idx], dd[cur_lo_idx]))
+            in_dip = False
+    if in_dip:
+        troughs.append((dates[cur_lo_idx], dd[cur_lo_idx]))
     return troughs
 
 
-def plot(df: pl.DataFrame, code: str, output_png: Path) -> None:
+def plot(df: pl.DataFrame, code: str, window: int, threshold: float, output_png: Path) -> None:
     dates = df["date"].to_list()
     closes = df["close"].to_list()
     peak_close = df["close"].cum_max().to_list()
@@ -99,7 +109,7 @@ def plot(df: pl.DataFrame, code: str, output_png: Path) -> None:
 
     # 标注主要谷值
     max_dd = df["dd"].min()
-    for d, depth in find_troughs(df, ANNOT_THRESHOLD):
+    for d, depth in find_troughs(df, threshold):
         is_max = abs(depth - max_dd) < 1e-9
         ax_dd.annotate(
             f"{d}  {depth * 100:.1f}%" + ("  (max)" if is_max else ""),
@@ -124,7 +134,7 @@ def plot(df: pl.DataFrame, code: str, output_png: Path) -> None:
     )
 
     fig.suptitle(
-        f"{code} — 成交额回撤（peak = cummax turnover，trough = daily turnover）\n"
+        f"{code} — 成交额回撤（peak = rolling max turnover, 窗口 {window} 日）\n"
         f"最大成交额回撤: {max_dd * 100:.2f}%",
         fontsize=12, fontweight="bold",
     )
@@ -134,10 +144,10 @@ def plot(df: pl.DataFrame, code: str, output_png: Path) -> None:
     plt.savefig(output_png, dpi=120, bbox_inches="tight")
     plt.close(fig)
     print(f"Saved to {output_png}")
-    print(f"  {code}: {dates[0]} ~ {dates[-1]}, {df.height} rows")
+    print(f"  {code}: {dates[0]} ~ {dates[-1]}, {df.height} rows, 滚动窗口 {window} 日")
     print(f"  最大成交额回撤: {max_dd * 100:.2f}%")
-    print(f"  标注谷值（深度 <= {ANNOT_THRESHOLD * 100:.0f}%）：")
-    for d, depth in find_troughs(df, ANNOT_THRESHOLD):
+    print(f"  标注谷值（深度 <= {threshold * 100:.0f}%）：")
+    for d, depth in find_troughs(df, threshold):
         print(f"    {d}  {depth * 100:.2f}%")
 
 
@@ -150,19 +160,27 @@ def main() -> None:
         help="含 {code}.parquet 的行情目录（必须含 turnover 列）",
     )
     parser.add_argument(
+        "--window", type=int, default=DEFAULT_WINDOW,
+        help=f"滚动最高成交额窗口（交易日，默认 {DEFAULT_WINDOW}）",
+    )
+    parser.add_argument(
+        "--threshold", type=float, default=DEFAULT_THRESHOLD,
+        help=f"标注阈值：回撤深于该值的谷才标（默认 {DEFAULT_THRESHOLD}，即 −80%）",
+    )
+    parser.add_argument(
         "--output", type=Path, default=None,
         help="输出 PNG 路径（默认 /mnt/dataset/turnover_drawdown_{code}.png）",
     )
     parser.add_argument(
         "--start-date", type=str, default=None,
-        help="起始日期 YYYY-MM-DD（cummax 从该日期起累计，默认从最早有成交日起）",
+        help="起始日期 YYYY-MM-DD（rolling max 从该日期起算，默认从最早有成交日起）",
     )
     args = parser.parse_args()
 
     output = args.output or Path(f"/mnt/dataset/turnover_drawdown_{args.code}.png")
     start = date.fromisoformat(args.start_date) if args.start_date else None
-    df = load_turnover(args.adjusted_dir, args.code, start)
-    plot(df, args.code, output)
+    df = load_turnover(args.adjusted_dir, args.code, args.window, start)
+    plot(df, args.code, args.window, args.threshold, output)
 
 
 if __name__ == "__main__":
