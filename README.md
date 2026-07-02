@@ -96,6 +96,7 @@
 | market_turnover_total | 沪深两市总成交额（日频）vs 沪深300（双轴，可 log） | [文档](plots/market_turnover_total.md) |
 | channel_entries_on_hs300 | 红利低波ETF通道买入点叠加在沪深300日线上 | [文档](plots/channel_entries_on_hs300.md) |
 | turnover_channel_breakout | 成交额通道重入信号（沪深300，log Bollinger + ZigZag 评估） | [文档](plots/turnover_channel_breakout.md) |
+| turnover_minmax_channel | 成交额通道（120 日滚动 max/min）+ 收盘价（上下两栏，log 刻度看天量/枯竭） | [文档](plots/turnover_minmax_channel.md) |
 | zigzag_annual_return | ZigZag 枢轴每年潜在最大收益与潜在最大损失（沪深300） | [文档](plots/zigzag_annual_return.md) |
 | zigzag_bull_bear_cycle | ZigZag 枢轴牛熊周期（沪深300，段数/涨跌/历时） | [文档](plots/zigzag_bull_bear_cycle.md) |
 | annual_volatility | 沪深300 每年年化波动率 + 指数对照 | [文档](plots/annual_volatility.md) |
