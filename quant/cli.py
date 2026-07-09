@@ -29,7 +29,7 @@ from quant.pipeline import (
     build_stages, build_equity_stages, build_index_stages,
     build_fund_stages, build_margin_stages, build_macro_stages, run_pipeline,
 )
-from quant.strategy import run_momentum_strategy, run_ma_crossover_strategy
+from quant.strategy import run_daily_momentum_strategy, run_ma_crossover_strategy
 
 console = Console()
 cli = typer.Typer(name="quant", help="命令行量化工具")
@@ -709,33 +709,37 @@ def filter_ma_converge(
 
 
 @cli.command()
-def momentum_strategy(
-    input_dir: str = "/mnt/dataset/index_quote_history",
-    output_csv: str = None,
+def daily_momentum_strategy(
+    input_dir: str = typer.Option(..., help="指数日线数据目录"),
+    output_csv: str = typer.Option(..., help="输出明细 CSV"),
     output_png: str = None,
-    cash_when_all_negative: bool = False,
+    lookback_days: int = 20,
+    cost_rate: float = 0.0003,
 ) -> None:
-    """月度动量轮动策略：CSI300/CSI500/创业板50 每月末选当月最强者持有"""
-    if output_csv is None:
-        console.print("[red]必须提供 --output-csv[/red]")
-        raise typer.Exit(1)
-    console.print(f"[cyan]运行月度动量轮动策略...[/cyan]")
-    stats = run_momentum_strategy(
+    """日频动量轮动：每日选过去 N 日收益最强指数持有，换仓扣成本"""
+    console.print(
+        f"[cyan]运行日频动量轮动策略 (lookback={lookback_days}d, cost {cost_rate:.4%}/单边)...[/cyan]"
+    )
+    stats = run_daily_momentum_strategy(
         input_dir=input_dir, output_csv=output_csv, output_png=output_png,
-        cash_when_all_negative=cash_when_all_negative,
+        lookback_days=lookback_days, cost_rate=cost_rate,
     )
 
     table = Table(title="策略统计")
     table.add_column("指标", style="cyan")
     table.add_column("值", style="yellow")
+    pct_keys = ("total_return", "cagr", "annual_vol", "max_drawdown")
     for k, v in stats.items():
-        if isinstance(v, float):
-            if k in ("total_return", "cagr", "annual_vol", "max_drawdown", "time_in_market"):
-                table.add_row(k, f"{v:.2%}")
-            elif k == "sharpe":
-                table.add_row(k, f"{v:.2f}")
-            else:
-                table.add_row(k, f"{v:.4f}")
+        if k in pct_keys and isinstance(v, float):
+            table.add_row(k, f"{v:.2%}")
+        elif k == "final_multiple" and isinstance(v, float):
+            table.add_row(k, f"{v:.2f}x")
+        elif k == "sharpe":
+            table.add_row(k, f"{v:.2f}")
+        elif k == "avg_hold_days":
+            table.add_row(k, f"{v:.1f}")
+        elif isinstance(v, float):
+            table.add_row(k, f"{v:.4f}")
         else:
             table.add_row(k, str(v))
     console.print(table)

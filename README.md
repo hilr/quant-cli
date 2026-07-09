@@ -271,26 +271,35 @@ uv run python -m quant.cli filter-volume-spike /mnt/dataset/stock_quote_ta /tmp/
 
 ## 策略
 
-### momentum_strategy — 月度动量轮动
+### daily_momentum_strategy — 日频动量轮动
 
-每月最后一个交易日，比较 CSI300/中证500/创业板50 三指数当月收益，选最强者持有到下个月末。
+每个交易日，比较有数据的指数过去 N 个交易日收益（默认 20 日），选最强者持有到下一日（T-1 信号决定 T 持仓）。候选池：CSI300(000300) / 中证500(000905) / 创业板50(399673) / 上证50(000016) / 科创50(000688)。
+
+上市时间不同的指数**按日动态加入**比较池（full join 对齐），不截断整体回测：CSI300 自 2002 起单独可比，上证50 自 2004 加入，中证500 自 2005 加入，创业板50 自 2014 加入，科创50 自 2020 加入。
+
+换仓**扣交易成本**：每次买卖各扣 `--cost-rate`（默认万分之三 = 0.03%），换仓 = 卖 + 买 = 2 次，建仓 = 1 次，持有不变 = 0 次。年化（CAGR）按实际日历跨度计算，避免 `交易日数 / 252` 高估。
 
 ```bash
-uv run python -m quant.cli momentum-strategy \
+uv run python -m quant.cli daily-momentum-strategy \
     --input-dir /mnt/dataset/index_quote_history \
-    --output-csv /mnt/dataset/strategy_momentum.csv \
-    --output-png /mnt/dataset/strategy_momentum.png \
-    --cash-when-all-negative
+    --output-csv /mnt/dataset/strategy_daily_momentum.csv \
+    --output-png /mnt/dataset/strategy_daily_momentum.png \
+    --lookback-days 20 \
+    --cost-rate 0.0003
 ```
 
-可选 `--cash-when-all-negative`：当上月三个指数收益全部为负时，本月空仓（收益记为 0）。
+参数：
+
+- `--input-dir` / `--output-csv`：必填（路径参数无默认值）
+- `--lookback-days`：动量回看交易日数（默认 20）
+- `--cost-rate`：单边交易成本（默认 0.0003 = 万分之三）
 
 输出：
 
-- `output_csv`：每月明细（持仓指数、当月收益、累计净值）
-- `output_png`：策略与三指数 B&H 的 NAV 曲线（对数轴）
+- `output_csv`：每日明细（持仓指数、日收益、累计净值）
+- `output_png`：策略与各指数 B&H 的 NAV 曲线（对数轴），策略曲线末端标注最终收益倍数
 
-回测区间约 12 年（2014 至今）。纯数学模拟，不考虑交易成本、滑点、税费。
+纯数学模拟，不计滑点、税费（成本仅按 `--cost-rate` 佣金估算）。
 
 ### ma_crossover_strategy — 双均线突破
 
