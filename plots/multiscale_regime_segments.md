@@ -27,8 +27,10 @@ uv run python plots/multiscale_regime_segments.py \
 
 **输出：**
 - 控制台三尺度分段明细表（大≥120 / 中≥60 / 小≥30 交易日）
-- `{large,medium,small}_segments.csv`：各尺度分段表（seg/dir/size/trade_days/start_date/end_date/high/low/return_pct/tail）
-- `multiscale_segments_{code}.png`：三联图（每行一尺度，绿=bull 红=bear，段内标 #/dir/size/td/ret）
+- 分段 CSV（默认写到 `/mnt/dataset/csi300_regime_segments/`）：
+  - `large_segments.csv` / `medium_segments.csv` / `small_segments.csv`
+  - 列：`seg, dir, size, trade_days, start_date, end_date, high, low, return_pct, tail`
+- `multiscale_segments_{code}.png`（默认 `/mnt/dataset/csi300_regime_segments/multiscale_segments_{code}.png`）：三联图（每行一尺度，绿=bull 红=bear，段内标 #/dir/size/td/ret）
 
 ## 方法
 
