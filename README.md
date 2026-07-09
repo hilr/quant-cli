@@ -99,6 +99,7 @@
 | turnover_minmax_channel | 成交额通道（120 日滚动 max/min）+ 收盘价（上下两栏，log 刻度看天量/枯竭） | [文档](plots/turnover_minmax_channel.md) |
 | zigzag_annual_return | ZigZag 枢轴每年潜在最大收益与潜在最大损失（沪深300） | [文档](plots/zigzag_annual_return.md) |
 | zigzag_bull_bear_cycle | ZigZag 枢轴牛熊周期（沪深300，段数/涨跌/历时） | [文档](plots/zigzag_bull_bear_cycle.md) |
+| multiscale_regime_segments | 多尺度牛熊分段金标准（大/中/小，熊市豁免合并，25% ZigZag） | [文档](plots/multiscale_regime_segments.md) |
 | annual_volatility | 沪深300 每年年化波动率 + 指数对照 | [文档](plots/annual_volatility.md) |
 | drawdown | 历史回撤水下曲线 + 前复权价格（基金/指数/股票通用，支持 --start-date 重置峰值） | [文档](plots/drawdown.md) |
 | drawdown_extremes_vs_hs300 | 任意标的回撤极值点（峰/谷竖虚线）叠加沪深300（双轴，标的可参数化） | [文档](plots/drawdown_extremes_vs_hs300.md) |
