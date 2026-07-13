@@ -59,6 +59,7 @@
 | fund_quote_history | 生成 | 基金行情历史 | [文档](docs/datasets/fund_quote_history.md) |
 | fund_flow | 生成 | 基金资金流 | [文档](docs/datasets/fund_flow.md) |
 | fund_hs300_correlation | 生成 | 沪深300关联基金滚动相关性 | [文档](docs/datasets/fund_hs300_correlation.md) |
+| etf_universe | 生成 | ETF 范围清单（宽基指数/行业/商品/债券/境外市场五类，附子分类） | [文档](docs/datasets/etf_universe.md) |
 | index_adjust_history | 生成 | 指数成份调整历史（调入/调出事件流，2015-2026，按年分文件） | [文档](docs/datasets/index_adjust_history.md) |
 | index_constituent_history | 生成 | 指数成份股入/出区间（最新 weight 锚点 + 调整历史反推，按指数/年份分文件） | [文档](docs/datasets/index_constituent_history.md) |
 
@@ -377,7 +378,8 @@ uv run python plots/channel_entry_signals.py --code 512890 --window 120 --k 1.5 
 │       ↓                                                         │
 │  fund_quote_adjusted (前复权)                                   │
 │       ├─→ fund_flow ← fund_shares_history                       │
-│       └─→ fund_hs300_correlation (沪深300关联基金滚动相关性)    │
+│       ├─→ fund_hs300_correlation (沪深300关联基金滚动相关性)    │
+│       └─→ etf_universe (ETF 范围清单：宽基/行业/商品/债券/境外)  │
 └─────────────────────────────────────────────────────────────────┘
 
 ┌─────────────────────────────────────────────────────────────────┐

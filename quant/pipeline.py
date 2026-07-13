@@ -9,6 +9,7 @@ from .convert import (
     convert_ta, convert_index_ta,
     convert_fund_shares, convert_fund_quote, convert_fund_flow,
     convert_fund_hs300_correlation,
+    convert_etf_universe,
     convert_pbc_money_supply, convert_pbc_social_financing_flow,
     convert_pbc_social_financing_stock, convert_pbc_credit_funds,
     convert_pbc_central_bank_balance_sheet,
@@ -57,6 +58,7 @@ def build_stages(data_path: str, output_dir: str) -> list[list[Step]]:
             Step("margin_trade_daily", convert_margin_trade_daily, dict(input_dir=f"{output_dir}/margin_trade_history", output_dir=f"{output_dir}/margin_trade_daily")),
             Step("fund_flow", convert_fund_flow, dict(shares_dir=f"{output_dir}/fund_shares_history", quote_dir=f"{output_dir}/fund_quote_adjusted", output_dir=f"{output_dir}/fund_flow")),
             Step("fund_hs300_correlation", convert_fund_hs300_correlation, dict(input_dir=f"{output_dir}/fund_quote_adjusted", output_dir=f"{output_dir}/fund_hs300_correlation")),
+            Step("etf_universe", convert_etf_universe, dict(input_dir=f"{output_dir}/fund_quote_adjusted", output_dir=f"{output_dir}/etf_universe")),
         ],
     ]
 
@@ -79,7 +81,7 @@ def build_index_stages(data_path: str, output_dir: str) -> list[list[Step]]:
 
 
 def build_fund_stages(data_path: str, output_dir: str) -> list[list[Step]]:
-    """基金链：fund_shares + fund_quote → fund_quote_adjusted → fund_flow + fund_hs300_correlation"""
+    """基金链：fund_shares + fund_quote → fund_quote_adjusted → fund_flow + fund_hs300_correlation + etf_universe"""
     return [
         [
             Step("fund_shares_history", convert_fund_shares, dict(data_path=data_path, output_dir=output_dir)),
@@ -89,6 +91,7 @@ def build_fund_stages(data_path: str, output_dir: str) -> list[list[Step]]:
         [
             Step("fund_flow", convert_fund_flow, dict(shares_dir=f"{output_dir}/fund_shares_history", quote_dir=f"{output_dir}/fund_quote_adjusted", output_dir=f"{output_dir}/fund_flow")),
             Step("fund_hs300_correlation", convert_fund_hs300_correlation, dict(input_dir=f"{output_dir}/fund_quote_adjusted", output_dir=f"{output_dir}/fund_hs300_correlation")),
+            Step("etf_universe", convert_etf_universe, dict(input_dir=f"{output_dir}/fund_quote_adjusted", output_dir=f"{output_dir}/etf_universe")),
         ],
     ]
 
