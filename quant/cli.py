@@ -7,7 +7,8 @@ from quant.convert import (convert_stock_quote, convert_margin_trade, convert_ad
                            convert_ta, convert_boll, convert_fund_shares, convert_fund_quote, convert_fund_adjust,
                            convert_fund_flow, convert_index_quote, convert_index_ta, convert_index_boll,
                            convert_fwd_return, convert_historical_stats,
-                           convert_fund_hs300_correlation, convert_industry_profit,
+                           convert_fund_hs300_correlation, convert_etf_universe,
+                           convert_industry_profit,
                            convert_pbc_money_supply, convert_pbc_overseas_rmb_assets,
                            convert_pbc_social_financing_flow,
                            convert_pbc_social_financing_stock, convert_pbc_credit_funds,
@@ -86,7 +87,7 @@ def refresh_fund(
     output_dir: str = "/mnt/dataset",
     workers: int = 2,
 ) -> None:
-    """刷新基金链：fund_shares + fund_quote → fund_quote_adjusted → fund_flow + fund_hs300_correlation"""
+    """刷新基金链：fund_shares + fund_quote → fund_quote_adjusted → fund_flow + fund_hs300_correlation + etf_universe"""
     console.print(f"[cyan]刷新基金数据（workers={workers}）...[/cyan]")
     stages = build_fund_stages(data_path=data_path, output_dir=output_dir)
     run_pipeline(stages, workers=workers, console=console,
@@ -305,6 +306,17 @@ def fund_hs300_corr(
     console.print("[cyan]计算沪深300关联基金滚动相关性...[/cyan]")
     count = convert_fund_hs300_correlation(input_dir=input_dir, output_dir=output_dir)
     console.print(f"[green]完成! 共 {count} 只基金[/green]")
+
+
+@cli.command()
+def etf_universe(
+    input_dir: str = "/mnt/dataset/fund_quote_adjusted",
+    output_dir: str = "/mnt/dataset/etf_universe",
+) -> None:
+    """生成 ETF 范围清单：筛出名称含 ETF 的基金，分为宽基指数/行业/商品/债券四类"""
+    console.print("[cyan]生成 ETF 范围清单...[/cyan]")
+    count = convert_etf_universe(input_dir=input_dir, output_dir=output_dir)
+    console.print(f"[green]完成! 共 {count} 只 ETF[/green]")
 
 
 @cli.command()

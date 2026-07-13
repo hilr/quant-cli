@@ -999,6 +999,190 @@ def convert_fund_hs300_correlation(
     return count
 
 
+# ============== etf_universe ==============
+
+# ETF 大类分类规则（按优先级，先匹配的生效；均不匹配则归「行业ETF」）
+_ETF_CATEGORY_RULES = [
+    # 债券ETF
+    ("债", "债券ETF"),
+    ("国债", "债券ETF"),
+    ("国开", "债券ETF"),
+    # 商品ETF
+    ("黄金", "商品ETF"),
+    ("原油", "商品ETF"),
+    ("白银", "商品ETF"),
+    ("豆粕", "商品ETF"),
+    ("有色ETF", "商品ETF"),
+    ("油气", "商品ETF"),
+    # 境外市场ETF（港股/美股/日股等跨境，优先级在宽基前，避免恒生50等污染 A 股宽基）
+    ("恒生", "境外市场ETF"), ("恒指", "境外市场ETF"), ("港股", "境外市场ETF"),
+    ("港美", "境外市场ETF"), ("香港", "境外市场ETF"), ("H股", "境外市场ETF"),
+    ("中概", "境外市场ETF"), ("美股", "境外市场ETF"), ("美国", "境外市场ETF"), ("海外", "境外市场ETF"),
+    ("日经", "境外市场ETF"), ("纳斯达克", "境外市场ETF"), ("纳指", "境外市场ETF"),
+    ("标普", "境外市场ETF"), ("德国", "境外市场ETF"), ("法国", "境外市场ETF"),
+    ("英国", "境外市场ETF"), ("印度", "境外市场ETF"), ("东南亚", "境外市场ETF"),
+    ("日本", "境外市场ETF"), ("越南", "境外市场ETF"), ("韩国", "境外市场ETF"),
+    ("中韩", "境外市场ETF"), ("新加坡", "境外市场ETF"), ("欧洲", "境外市场ETF"),
+    ("金砖", "境外市场ETF"), ("东盟", "境外市场ETF"), ("亚太", "境外市场ETF"),
+    ("全球", "境外市场ETF"), ("QDII", "境外市场ETF"),
+    ("沪港深", "境外市场ETF"), ("沪港通", "境外市场ETF"),
+    # 宽基指数ETF（含沪深300策略变体；300 兜底覆盖沪深300简称如 510300「300ETF」）
+    ("沪深300", "宽基指数ETF"),
+    ("HS300", "宽基指数ETF"),
+    ("上证50", "宽基指数ETF"),
+    ("中证500", "宽基指数ETF"),
+    ("中证1000", "宽基指数ETF"),
+    ("中证2000", "宽基指数ETF"),
+    ("国证2000", "宽基指数ETF"),
+    ("中证800", "宽基指数ETF"),
+    ("A500", "宽基指数ETF"),
+    ("A50", "宽基指数ETF"),
+    ("MSCI", "宽基指数ETF"),
+    ("科创50", "宽基指数ETF"),
+    ("科创100", "宽基指数ETF"),
+    ("科创板", "宽基指数ETF"),
+    ("创业板", "宽基指数ETF"),
+    ("深证", "宽基指数ETF"),
+    ("等权", "宽基指数ETF"),
+    ("300", "宽基指数ETF"),
+    # 核心宽基简称（510050「50ETF」/510500「500ETF」等，无前缀的招牌简称）
+    ("50ETF", "宽基指数ETF"),
+    ("500ETF", "宽基指数ETF"),
+]
+
+_ETF_DEFAULT_CATEGORY = "行业ETF"
+
+# 行业/主题关键词（用于宽基回判：宽基前缀 + 行业后缀时降级为行业ETF，如「创业板新能源」）
+_ETF_INDUSTRY_KEYWORDS = [
+    "消费", "医药", "军工", "新能源", "芯片", "半导体", "光伏",
+    "汽车", "房地产", "煤炭", "钢铁", "养殖", "粮食", "银行",
+    "证券", "化工", "农业", "人工智能", "机器人", "锂电", "环保",
+    "传媒", "旅游", "基建", "建材", "机械", "电力", "通信",
+    "计算机", "电子", "食品饮料", "白酒", "家电", "有色",
+]
+
+
+def _etf_category(name: str) -> str:
+    """按名称关键词判断 ETF 大类，无匹配归「行业ETF」。
+    宽基命中后回判：若同时含行业词（如「创业板新能源」），降级为行业ETF。"""
+    for keyword, category in _ETF_CATEGORY_RULES:
+        if keyword in name:
+            if category == "宽基指数ETF" and any(kw in name for kw in _ETF_INDUSTRY_KEYWORDS):
+                return _ETF_DEFAULT_CATEGORY
+            return category
+    return _ETF_DEFAULT_CATEGORY
+
+
+# 行业子类规则（优先匹配：保证「创业板新能源」→新能源 而非创业板；具体词前置）
+_ETF_INDUSTRY_SUB_RULES = [
+    ("消费电子", "消费电子"),
+    ("食品饮料", "食品饮料"), ("白酒", "白酒"), ("家电", "家电"), ("消费", "消费"),
+    ("创新药", "创新药"), ("生物医药", "生物医药"), ("医疗器械", "医疗器械"),
+    ("医疗", "医疗"), ("医药", "医药"),
+    ("券商", "证券"), ("证券", "证券"), ("保险", "保险"), ("银行", "银行"), ("金融", "金融"),
+    ("国防", "军工"), ("军工", "军工"),
+    ("新能源车", "新能源车"), ("新能源汽车", "新能源车"),
+    ("光伏", "光伏"), ("锂电", "锂电池"), ("电池", "锂电池"), ("新能源", "新能源"),
+    ("汽车", "汽车"),
+    ("芯片", "芯片"), ("半导体", "半导体"),
+    ("人工智能", "人工智能"), ("机器人", "机器人"), ("云计算", "云计算"),
+    ("大数据", "大数据"), ("计算机", "计算机"), ("通信", "通信"), ("5G", "通信"),
+    ("传媒", "传媒"), ("游戏", "游戏"), ("影视", "影视"),
+    ("煤炭", "煤炭"), ("钢铁", "钢铁"), ("稀土", "稀土"),
+    ("有色金属", "有色金属"), ("有色", "有色金属"), ("化工", "化工"), ("石油", "石油"),
+    ("房地产", "房地产"), ("地产", "房地产"),
+    ("基建", "基建"), ("建材", "建材"), ("建筑", "建筑"),
+    ("机械", "机械"), ("绿电", "绿电"), ("电力", "电力"), ("环保", "环保"),
+    ("农业", "农业"), ("养殖", "养殖"), ("粮食", "粮食"), ("种业", "种业"),
+    ("旅游", "旅游"), ("物流", "物流"), ("交运", "交通运输"),
+]
+
+# 宽基子类规则（行业不匹配时再用；顺序敏感：风格变体→沪深300全称→非沪深300排除→300ETF简称）
+_ETF_BROADBASED_SUB_RULES = [
+    ("沪深港300", "沪深港300"), ("HGS300", "沪深港300"), ("AH300", "AH300"),
+    # 沪深300 风格变体（先于全称、先于排除、先于简称）
+    ("300现金流", "300现金流"), ("300等权", "300等权"),
+    ("300增强", "300增强"), ("300指增", "300增强"), ("300ETF增", "300增强"),
+    ("300成长", "300成长"), ("300价值", "300价值"),
+    ("300红利", "300红利"),
+    # 沪深300 全称（必须在「深300」前——「沪深300」含子串「深300」）
+    ("沪深300LOF", "沪深300"), ("沪深300", "沪深300"), ("HS300", "沪深300"),
+    # 非沪深300的 300 指数（排除，各自独立子类）
+    ("民企300", "民企300"), ("ESG300", "ESG300"),
+    ("创300", "创业板300"), ("中小300", "中小300"), ("深300", "深证300"),
+    # 沪深300 简称（排除后，避免创300ETF/深300ETF 误匹配）
+    ("300LOF", "沪深300"), ("300ETF", "沪深300"),
+    ("中证800", "中证800"),
+    # A500族（增强/红利低波变体各自子类）
+    ("A500增强", "A500增强"), ("A500红利低波", "A500红利低波"),
+    ("A500", "中证A500"), ("A50", "中证A50"), ("MSCI", "MSCI中国A50"),
+    ("上证50", "上证50"),
+    ("中证500", "中证500"), ("500ETF", "中证500"),
+    ("中证1000", "中证1000"), ("1000ETF", "中证1000"),
+    ("国证2000", "国证2000"), ("中证2000", "中证2000"),
+    ("科创50", "科创50"), ("科创100", "科创100"), ("科创板", "科创板"),
+    ("创业板50", "创业板50"), ("创50", "创业板50"),
+    ("创业板", "创业板"), ("深证", "深证"),
+    # 不设「50ETF」简称兜底：「XX50ETF」是海量主题ETF命名（软件50/TMT50/美国50），
+    # 无法与上证50区分；510050「50ETF」等简称 sub=None（category 仍为宽基）
+]
+
+
+def _etf_subcategory(name: str) -> str | None:
+    """行业子类优先（保证「创业板新能源」→新能源），其次宽基子类，无匹配返回 None"""
+    for kw, sub in _ETF_INDUSTRY_SUB_RULES:
+        if kw in name:
+            return sub
+    for kw, sub in _ETF_BROADBASED_SUB_RULES:
+        if kw in name:
+            return sub
+    return None
+
+
+def convert_etf_universe(
+    input_dir: str,
+    output_dir: str,
+) -> int:
+    """从基金行情数据中筛出 ETF（名称含 ETF），按名称关键词分为宽基指数/行业/商品/债券/境外市场五类，
+    并给宽基与行业 ETF 标注子分类，输出范围清单"""
+    input_path = Path(input_dir)
+    output_path = Path(output_dir)
+    output_path.mkdir(parents=True, exist_ok=True)
+    for f in output_path.glob("*.parquet"):
+        f.unlink()
+
+    rows = []
+    for pf in sorted(input_path.glob("*.parquet")):
+        try:
+            name = pl.read_parquet(pf, columns=["name"])["name"][0]
+        except Exception:
+            continue
+        if "ETF" not in name:
+            continue
+        cat = _etf_category(name)
+        sub = _etf_subcategory(name) if cat in ("宽基指数ETF", "行业ETF") else None
+        rows.append({"code": pf.stem, "name": name, "category": cat, "subcategory": sub})
+
+    if not rows:
+        print(f"No ETF found in {input_path}")
+        return 0
+
+    result = pl.DataFrame(rows, orient="row")
+    result.write_parquet(output_path / "etf_universe.parquet")
+
+    for row in result.group_by("category").len().sort("category").iter_rows(named=True):
+        print(f"  {row['category']:12s} → {row['len']}")
+
+    multi = (result.filter(pl.col("subcategory").is_not_null())
+             .group_by("subcategory").len().filter(pl.col("len") >= 2)
+             .sort("len", descending=True))
+    print(f"  细分子类（成员≥2）共 {len(multi)} 个:")
+    for row in multi.iter_rows(named=True):
+        print(f"    {row['subcategory']:10s} → {row['len']}")
+    print(f"Saved {len(rows)} ETFs to {output_path / 'etf_universe.parquet'}")
+    return len(rows)
+
+
 # ============== industry_profit ==============
 
 # XLSX 命名空间
