@@ -274,11 +274,46 @@ def main() -> None:
         ax_bot.axvline(dates[i], color="#2ca02c", lw=0.6, alpha=0.6,
                        linestyle="--", zorder=2)
 
+    # 右侧留出空白带放状态卡，确保不遮挡指标线
     span = dates[-1] - dates[0]
-    ax_bot.set_xlim(dates[0], dates[-1] + span * 0.02)
-    ax_bot.text(0.99, 0.03, f"最新 {dates[-1]}", transform=ax_bot.transAxes,
-                ha="right", va="bottom", fontsize=10, color="#222", fontweight="bold",
-                bbox=dict(boxstyle="round,pad=0.3", fc="white", ec="#bbb", alpha=0.85))
+    ax_bot.set_xlim(dates[0], dates[-1] + span * 0.20)
+
+    # === 右侧状态卡（统一放右上角，落在右侧无数据区） ===
+    latest_close = closes[-1]
+    latest_turnover = turnovers[-1]
+    latest_upper = upper[-1]
+    latest_lower = lower[-1]
+    latest_mid = mid[-1]
+    pos_pct = ((latest_turnover - latest_lower) / (latest_upper - latest_lower)) * 100
+    latest_buy = buy_signals[-1] if buy_signals else None
+    latest_sell = sell_signals[-1] if sell_signals else None
+
+    top_lines = [f"最新  {dates[-1]}", f"沪深300  {latest_close:,.0f}"]
+    if latest_buy is not None:
+        top_lines.append(f"最新 buy   {dates[latest_buy].strftime('%Y-%m-%d')}  {closes[latest_buy]:,.0f}")
+    if latest_sell is not None:
+        top_lines.append(f"最新 sell  {dates[latest_sell].strftime('%Y-%m-%d')}  {closes[latest_sell]:,.0f}")
+    ax_top.text(0.995, 0.97, "\n".join(top_lines),
+                transform=ax_top.transAxes, ha="right", va="top",
+                fontsize=9, color="#222", fontweight="bold",
+                bbox=dict(boxstyle="round,pad=0.4", fc="white", ec="#bbb", alpha=0.9))
+
+    bot_lines = [
+        f"最新  {dates[-1]}",
+        f"成交额  {latest_turnover/1e8:,.0f} 亿",
+        f"通道上轨  {latest_upper/1e8:,.0f} 亿",
+        f"通道中轨  {latest_mid/1e8:,.0f} 亿",
+        f"通道下轨  {latest_lower/1e8:,.0f} 亿",
+        f"通道内位置  {pos_pct:.0f}%",
+    ]
+    if latest_buy is not None:
+        bot_lines.append(f"最新 buy   {turnovers[latest_buy]/1e8:,.0f} 亿")
+    if latest_sell is not None:
+        bot_lines.append(f"最新 sell  {turnovers[latest_sell]/1e8:,.0f} 亿")
+    ax_bot.text(0.995, 0.97, "\n".join(bot_lines),
+                transform=ax_bot.transAxes, ha="right", va="top",
+                fontsize=9, color="#222", fontweight="bold",
+                bbox=dict(boxstyle="round,pad=0.4", fc="white", ec="#bbb", alpha=0.9))
     ax_bot.set_title(
         f"沪深300成交额 + 通道 MA{args.window}±{args.k}σ（log 空间）+ 所有外溢日 + 重入信号（虚线）",
         fontsize=11, fontweight="bold", loc="left",
