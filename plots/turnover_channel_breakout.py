@@ -148,7 +148,8 @@ def main() -> None:
     p.add_argument("--index-dir", type=Path,
                    default=Path("/mnt/dataset/index_quote_history"))
     p.add_argument("--code", default=INDEX_CODE)
-    p.add_argument("--start-date", type=str, default="2010-01-01")
+    p.add_argument("--start-date", type=str, default="2005-01-04",
+                   help="起始日期（默认沪深300上市日，覆盖全周期）")
     p.add_argument("--window", type=int, default=60, help="通道 MA 窗口")
     p.add_argument("--k", type=float, default=2.0, help="通道宽度（log 空间 σ 倍数）")
     p.add_argument("--zigzag", type=float, default=0.08,
