@@ -105,10 +105,10 @@ def main() -> None:
     for d, price, r, mdd, _tbot, mx_gain, t_peak, _days, is_partial in fwd:
         if is_partial:
             # 窗口未满：空心三角区分，标注仍用最新已知值
-            ax.scatter([d], [price], marker="^", s=70, zorder=5,
+            ax.scatter([d], [price], marker="^", s=38, zorder=5,
                        facecolors="white", edgecolors="green", linewidths=1.3)
         else:
-            ax.scatter([d], [price], marker="^", color="green", s=55, zorder=5,
+            ax.scatter([d], [price], marker="^", color="green", s=38, zorder=5,
                        edgecolors="white", linewidths=0.5)
         txt = f"+{mx_gain*100:.1f}%\n{r*100:+.1f}%"
         color = "#1a7f37" if r > 0 else "#b22222"
