@@ -24,7 +24,7 @@ uv run python plots/turnover_channel_breakout.py --code 000001
 |------|------|------|
 | `--index-dir` | 指数 parquet 父目录 | /mnt/dataset/index_quote_history |
 | `--code` | 指数代码 | 000300（沪深300） |
-| `--start-date` | 起始日期 | 2010-01-01 |
+| `--start-date` | 起始日期 | 2005-01-04（沪深300上市日，全周期） |
 | `--window` | 通道 MA 窗口 | 60 |
 | `--k` | 通道宽度（log 空间 σ 倍数） | 2.0 |
 | `--zigzag` | 价格 ZigZag 反转阈值 | 0.08（8%） |
