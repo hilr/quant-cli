@@ -206,29 +206,8 @@ def main() -> None:
     lower_v = [v if v is not None else nan for v in lower]
     mid_v = [v if v is not None else nan for v in mid]
 
-    # === 上面板：价格 + ZigZag 枢轴（短竖线 + 偏移 ◆）+ 重入信号跨面板竖线 ===
+    # === 上面板：价格 + 重入信号跨面板竖线 ===
     ax_top.plot(dates, closes, color="#444", lw=0.6, label="沪深300收盘")
-    if zz_pivots:
-        pv_h_idx = [p[0] for p in zz_pivots if p[2] == "H"]
-        pv_l_idx = [p[0] for p in zz_pivots if p[2] == "L"]
-        for i in pv_h_idx:
-            ax_top.vlines(dates[i], closes[i], closes[i] * 1.015,
-                          color="#d62728", lw=0.9, alpha=0.75, zorder=4)
-        if pv_h_idx:
-            ax_top.scatter([dates[i] for i in pv_h_idx],
-                           [closes[i] * 1.015 for i in pv_h_idx],
-                           marker="D", color="black", s=42, zorder=6,
-                           edgecolors="#d62728", linewidths=0.9,
-                           label=f"阶段高点 H（{len(pv_h_idx)}）")
-        for i in pv_l_idx:
-            ax_top.vlines(dates[i], closes[i] * 0.985, closes[i],
-                          color="#2ca02c", lw=0.9, alpha=0.75, zorder=4)
-        if pv_l_idx:
-            ax_top.scatter([dates[i] for i in pv_l_idx],
-                           [closes[i] * 0.985 for i in pv_l_idx],
-                           marker="D", color="black", s=30, zorder=6,
-                           edgecolors="#2ca02c", linewidths=0.9,
-                           label=f"阶段低点 L（{len(pv_l_idx)}）")
     # 重入信号竖线（贯穿上图，虚线）
     for i in sell_signals:
         ax_top.axvline(dates[i], color="#d62728", lw=0.6, alpha=0.6,
@@ -240,7 +219,7 @@ def main() -> None:
     ax_top.grid(True, alpha=0.3)
     ax_top.legend(loc="upper left", fontsize=8, ncol=3)
     ax_top.set_title(
-        f"沪深300价格 + ZigZag 枢轴（{args.zigzag:.0%}）+ 重入信号竖线\n"
+        f"沪深300价格 + 重入信号竖线\n"
         f"{dates[0]} ~ {dates[-1]}（{n} 个交易日）；"
         f"sell = 成交额从上轨外跌回通道内（{len(sell_signals)}），"
         f"buy = 从下轨外升回通道内（{len(buy_signals)}）",
