@@ -219,11 +219,19 @@ PRICE_COLS = ["prev_close", "open", "high", "low", "close"]
 def convert_adjust(
     input_dir: str = "/mnt/dataset/stock_quote_history",
     output_dir: str = "/mnt/dataset/stock_quote_adjusted",
+    trading_days_dir: str = "/mnt/readonly_dataset/exchange_szse/index_quote",
 ) -> int:
-    """前复权：将股票历史价格按最新价格向前调整"""
+    """前复权：将股票历史价格按最新价格向前调整。
+
+    用深交所 index_quote 文件名集合作为权威交易日历，过滤休市日的 ffill 假行：
+    上游数据源在元旦等休市日会灌入 prev_close 失真的复制行，若不过滤会污染
+    factor 计算（参见 new_float_market_cap 文档「数据清洗」一节的 2025-01-02 案例）。
+    """
     input_path = Path(input_dir)
     output_path = Path(output_dir)
     output_path.mkdir(parents=True, exist_ok=True)
+
+    trading_days = sorted(p.stem for p in Path(trading_days_dir).glob("*.csv"))
 
     parquet_files = sorted(input_path.glob("*.parquet"))
     if not parquet_files:
@@ -232,6 +240,7 @@ def convert_adjust(
     count = 0
     for pf in parquet_files:
         df = pl.read_parquet(pf)
+        df = df.filter(pl.col("date").is_in(trading_days))
 
         # 降序排序（新→旧）
         df = df.sort("date", descending=True)
@@ -2687,6 +2696,78 @@ def convert_turnover_concentration(
     out_path.mkdir(parents=True, exist_ok=True)
     out_df.write_csv(out_path / "turnover_concentration.csv")
     print(f"Saved turnover_concentration: {len(out_df)} rows to {out_path}")
+    return len(out_df)
+
+
+# ============== new_float_market_cap（剔除股价影响的流通市值变化）==============
+
+# 上游 free_float_market_cap 口径跳变日：上游数据源在 2022-05-09 对深市（深A+创业板+深B）
+# 约 2600 只股票的 ffmc 一致下调约 -7%（沪市/科创板不受影响），非真实筹码变化，
+# delta 失真，从输出剔除。成因见数据集文档 new_float_market_cap.md。
+_KNOWN_REGIME_BREAK_DATES = {"2022-05-09"}
+
+
+def convert_new_float_market_cap(
+    input_dir: str = "/mnt/dataset/stock_quote_adjusted",
+    output_dir: str = "/mnt/dataset",
+    trading_days_dir: str = "/mnt/readonly_dataset/exchange_szse/index_quote",
+) -> int:
+    """剔除股价涨跌影响的日度流通市值变化（全市场宽表）。
+
+    基于前复权行情（close 为前复权价、free_float_market_cap 为真实市值）：
+        shares_t = free_float_market_cap_t / close_t        # 复权口径股本，吸收除权除息
+        delta_t  = close_t * (shares_t - shares_{t-1})      # 剔除股价部分后的市值变化
+    全市场按日聚合：
+        new_float_market_cap       = Σ delta        # 净变化
+        float_market_cap_increase  = Σ delta>0      # 正项：IPO/解禁/增发（从股市拿钱）
+        float_market_cap_decrease  = Σ delta<0      # 负项：分红/回购（向股市发钱）
+        stock_count                = 当日有效 delta 的股票数
+
+    用深交所 index_quote 文件名集合作为权威交易日历过滤输入（剔除休市日脏数据）；
+    默认范围 2005 起。已知上游 free_float_market_cap 口径跳变日（2022-05-09：深市
+    集体下调约 -7%，非真实筹码变化）从输出剔除，成因见数据集文档。
+    """
+    input_path = Path(input_dir)
+    parquet_files = sorted(input_path.glob("*.parquet"))
+    if not parquet_files:
+        raise FileNotFoundError(f"No parquet files found in {input_path}")
+
+    trading_days_path = Path(trading_days_dir)
+    trading_days = sorted(p.stem for p in trading_days_path.glob("*.csv"))
+    if not trading_days:
+        raise FileNotFoundError(f"No trading-day csv in {trading_days_dir}")
+    print(f"交易日历: {trading_days[0]} ~ {trading_days[-1]}（{len(trading_days)} 天）")
+
+    parts = []
+    for i, pf in enumerate(parquet_files):
+        s = (pl.scan_parquet(pf)
+             .select(pl.col("date"), pl.col("close"), pl.col("free_float_market_cap"))
+             .filter(pl.col("date").is_in(trading_days))
+             .sort("date")
+             .with_columns((pl.col("free_float_market_cap") / pl.col("close")).alias("_shares"))
+             .with_columns(
+                 (pl.col("close") * (pl.col("_shares") - pl.col("_shares").shift(1))).alias("delta"))
+             .select("date", "delta"))
+        parts.append(s.collect())
+        if (i + 1) % 1000 == 0:
+            print(f"  {i + 1}/{len(parquet_files)}...")
+    all_delta = pl.concat(parts, how="vertical")
+    print(f"扫描 {len(parquet_files)} 只股票完成")
+
+    out_df = (all_delta
+              .group_by("date")
+              .agg(
+                  pl.col("delta").sum().alias("new_float_market_cap"),
+                  pl.col("delta").filter(pl.col("delta") > 0).sum().alias("float_market_cap_increase"),
+                  pl.col("delta").filter(pl.col("delta") < 0).sum().alias("float_market_cap_decrease"),
+                  pl.col("delta").is_not_null().sum().alias("stock_count"),
+              )
+              .sort("date"))
+    out_df = out_df.filter(~pl.col("date").is_in(list(_KNOWN_REGIME_BREAK_DATES)))
+    out_path = Path(output_dir)
+    out_path.mkdir(parents=True, exist_ok=True)
+    out_df.write_csv(out_path / "new_float_market_cap.csv")
+    print(f"Saved new_float_market_cap: {len(out_df)} rows to {out_path}")
     return len(out_df)
 
 

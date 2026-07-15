@@ -17,7 +17,7 @@ from quant.convert import (convert_stock_quote, convert_margin_trade, convert_ad
                            convert_gov_stat_retail_monthly,
                            convert_gov_stat_port_freight, convert_gov_stat_freight,
                            convert_gov_stat_passenger,
-                           convert_turnover_concentration,
+                           convert_turnover_concentration, convert_new_float_market_cap,
                            convert_exchange_hkex_southbound_flow,
                            convert_index_adjust_history,
                            convert_index_constituent_history)
@@ -211,10 +211,12 @@ def margin_trade(
 def adjust(
     input_dir: str = "/mnt/dataset/stock_quote_history",
     output_dir: str = "/mnt/dataset/stock_quote_adjusted",
+    trading_days_dir: str = "/mnt/readonly_dataset/exchange_szse/index_quote",
 ) -> None:
     """前复权：将股票历史价格按最新价格向前调整"""
     console.print(f"[cyan]前复权计算...[/cyan]")
-    count = convert_adjust(input_dir=input_dir, output_dir=output_dir)
+    count = convert_adjust(input_dir=input_dir, output_dir=output_dir,
+                           trading_days_dir=trading_days_dir)
     console.print(f"[green]完成! 共 {count} 只股票[/green]")
 
 
@@ -539,6 +541,19 @@ def turnover_concentration(
     console.print(f"[cyan]计算成交额集中度（{start_year} 起）...[/cyan]")
     count = convert_turnover_concentration(
         data_path=data_path, output_dir=output_dir, start_year=start_year)
+    console.print(f"[green]完成! 共 {count} 个交易日[/green]")
+
+
+@cli.command()
+def new_float_market_cap(
+    input_dir: str = "/mnt/dataset/stock_quote_adjusted",
+    output_dir: str = "/mnt/dataset",
+    trading_days_dir: str = "/mnt/readonly_dataset/exchange_szse/index_quote",
+) -> None:
+    """剔除股价涨跌影响的日度流通市值变化（正/负/净分列，全市场宽表）"""
+    console.print(f"[cyan]计算流通市值变化（剔除股价）...[/cyan]")
+    count = convert_new_float_market_cap(
+        input_dir=input_dir, output_dir=output_dir, trading_days_dir=trading_days_dir)
     console.print(f"[green]完成! 共 {count} 个交易日[/green]")
 
 
