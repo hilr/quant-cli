@@ -2,7 +2,7 @@
 
 存放可复用的策略回测。当前包含：
 
-- ``run_daily_momentum_strategy`` —— 5 宽基指数日频动量轮动（每日选过去 N 日最强者）
+- ``run_daily_momentum_strategy`` —— 6 宽基指数日频动量轮动（每日选过去 N 日最强者）
 - ``run_signal_strategy`` —— 通用 tag 信号驱动回测（买入/卖出各为一个 Signal，不对称）
 """
 from __future__ import annotations
@@ -15,6 +15,7 @@ import polars as pl
 MOMENTUM_INDICES = {
     "000300": "CSI300",
     "000905": "CSI500",
+    "000852": "CSI1000",
     "399673": "ChiNext50",
     "000016": "SSE50",
     "000688": "STAR50",
@@ -47,7 +48,7 @@ def run_daily_momentum_strategy(
 
     indices = indices or MOMENTUM_INDICES
     names = list(indices.values())
-    colors = {n: c for n, c in zip(names, ["#1f77b4", "#ff7f0e", "#2ca02c", "#d62728", "#9467bd"])}
+    colors = {n: c for n, c in zip(names, ["#1f77b4", "#ff7f0e", "#2ca02c", "#d62728", "#9467bd", "#8c564b"])}
 
     # 1. 读各指数日线，full join 对齐（不同上市时间留 null）
     frames = []
