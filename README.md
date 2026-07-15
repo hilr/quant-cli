@@ -53,6 +53,7 @@
 | stock_quote_adjusted | 生成 | 前复权行情 | [文档](docs/datasets/stock_quote_adjusted.md) |
 | stock_quote_ta | 生成 | 技术指标 | [文档](docs/datasets/stock_quote_ta.md) |
 | turnover_concentration | 生成 | 全 A 股日成交额集中度（gini/alpha/top5-median/hhi/cr10）+ 股票数 + 流通/总市值，宽表，1992 起 | [文档](docs/datasets/turnover_concentration.md) |
+| new_float_market_cap | 生成 | 剔除股价涨跌影响的日度流通市值变化（正/负/净分列，全市场宽表，2005 起） | [文档](docs/datasets/new_float_market_cap.md) |
 | margin_trade_history | 生成 | 融资融券历史 | [文档](docs/datasets/margin_trade_history.md) |
 | margin_trade_daily | 生成 | 融资融券每日净变化 | [文档](docs/datasets/margin_trade_daily.md) |
 | fund_shares_history | 生成 | 基金份额历史 | [文档](docs/datasets/fund_shares_history.md) |
@@ -93,6 +94,7 @@
 | turnover_concentration | A股日成交额集中度（5算法）vs 沪深300 | [文档](plots/turnover_concentration.md) |
 | index_turnover_river | 沪深300/中证500/中证1000/其他 成交额占比 river 图（streamgraph） | [文档](plots/index_turnover_river.md) |
 | market_stock_count | 沪深两市股票数 / 流通市值 / 总市值 / 沪深300（三轴，日频） | [文档](plots/market_stock_count.md) |
+| new_float_market_cap | 剔除股价影响的月度流通市值变化（扩容/回报/净额）vs 沪深300（双轴） | [文档](plots/new_float_market_cap.md) |
 | hs300_turnover_share | 沪深300 成交额占两市总成交额比例 vs 沪深300（双轴，日频） | [文档](plots/hs300_turnover_share.md) |
 | market_turnover_total | 沪深两市总成交额（日频）vs 沪深300（双轴，可 log） | [文档](plots/market_turnover_total.md) |
 | channel_entries_on_hs300 | 红利低波ETF通道买入点叠加在沪深300日线上 | [文档](plots/channel_entries_on_hs300.md) |
