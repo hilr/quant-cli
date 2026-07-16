@@ -107,6 +107,7 @@
 | drawdown | 历史回撤水下曲线 + 前复权价格（基金/指数/股票通用，支持 --start-date 重置峰值） | [文档](plots/drawdown.md) |
 | drawdown_extremes_vs_hs300 | 任意标的回撤极值点（峰/谷竖虚线）叠加沪深300（双轴，标的可参数化） | [文档](plots/drawdown_extremes_vs_hs300.md) |
 | window_return_distribution | 任意标的 N 日窗口收益率分布直方图（默认 512890/20日/1%桶宽，标的/窗口/桶宽均可参数化） | [文档](plots/window_return_distribution.md) |
+| fund_pair_compare | 两只标的前复权收盘价双轴 + N 日滚动相关系数柱状（标的/窗口/相关窗口均可参数化） | [文档](plots/fund_pair_compare.md) |
 
 ---
 
