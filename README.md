@@ -103,6 +103,8 @@
 | zigzag_annual_return | ZigZag 枢轴每年潜在最大收益与潜在最大损失（沪深300） | [文档](plots/zigzag_annual_return.md) |
 | zigzag_bull_bear_cycle | ZigZag 枢轴牛熊周期（沪深300，段数/涨跌/历时） | [文档](plots/zigzag_bull_bear_cycle.md) |
 | multiscale_regime_segments | 多尺度牛熊分段金标准（大/中/小，熊市豁免合并，25% ZigZag） | [文档](plots/multiscale_regime_segments.md) |
+| segment_daily_return_distribution | 大级别牛熊分段内 日收益率分布直方图网格（沪深300，4×3 面板 + 牛熊聚合对比） | [文档](plots/segment_daily_return_distribution.md) |
+| next_day_return_heatmap | 截止当日 N1 日 → 之后 N2 日 收益 2D 热力图（牛 vs 熊对比，log 色阶，象限占比 + 条件概率，窗口/步长可参数化） | [文档](plots/next_day_return_heatmap.md) |
 | annual_volatility | 沪深300 每年年化波动率 + 指数对照 | [文档](plots/annual_volatility.md) |
 | drawdown | 历史回撤水下曲线 + 前复权价格（基金/指数/股票通用，支持 --start-date 重置峰值） | [文档](plots/drawdown.md) |
 | drawdown_extremes_vs_hs300 | 任意标的回撤极值点（峰/谷竖虚线）叠加沪深300（双轴，标的可参数化） | [文档](plots/drawdown_extremes_vs_hs300.md) |
