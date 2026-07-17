@@ -106,6 +106,7 @@
 | segment_daily_return_distribution | 大级别牛熊分段内 日收益率分布直方图网格（沪深300，4×3 面板 + 牛熊聚合对比） | [文档](plots/segment_daily_return_distribution.md) |
 | next_day_return_heatmap | 截止当日 N1 日 → 之后 N2 日 收益 2D 热力图（牛 vs 熊对比，log 色阶，象限占比 + 条件概率，窗口/步长可参数化） | [文档](plots/next_day_return_heatmap.md) |
 | conditional_forward_return | 前 N1 日收益分桶 → 之后 N2 日收益条件分布（牛 vs 熊箱线图，均值偏移/厚尾/峰度，桶边界可参数化） | [文档](plots/conditional_forward_return.md) |
+| sweep_conditional_tail | 跨 N1=1..10 × N2=1..3 扫描条件分布，筛厚尾+显著偏移模式（双向 box plot，分布卡片在 x 轴下方） | [文档](plots/sweep_conditional_tail.md) |
 | annual_volatility | 沪深300 每年年化波动率 + 指数对照 | [文档](plots/annual_volatility.md) |
 | drawdown | 历史回撤水下曲线 + 前复权价格（基金/指数/股票通用，支持 --start-date 重置峰值） | [文档](plots/drawdown.md) |
 | drawdown_extremes_vs_hs300 | 任意标的回撤极值点（峰/谷竖虚线）叠加沪深300（双轴，标的可参数化） | [文档](plots/drawdown_extremes_vs_hs300.md) |
