@@ -111,6 +111,9 @@
 | drawdown | 历史回撤水下曲线 + 前复权价格（基金/指数/股票通用，支持 --start-date 重置峰值） | [文档](plots/drawdown.md) |
 | drawdown_extremes_vs_hs300 | 任意标的回撤极值点（峰/谷竖虚线）叠加沪深300（双轴，标的可参数化） | [文档](plots/drawdown_extremes_vs_hs300.md) |
 | window_return_distribution | 任意标的 N 日窗口收益率分布直方图（默认 512890/20日/1%桶宽，标的/窗口/桶宽均可参数化） | [文档](plots/window_return_distribution.md) |
+| window_return_p1_episodes | N 日窗口 P 分位极端事件按月聚集分布（默认 5 大 A 股指数 × 5/10/20 日 × P1 左尾，标的/窗口/分位/方向均可参数化） | [文档](plots/window_return_p1_episodes.md) |
+| boll_breakout_forward_return | Bollinger 通道突破事件 → 未来 M 日收益分布（2×3 直方图网格，含基线 alpha 对比，标的/窗口/k/持有期可参数化） | [文档](plots/boll_breakout_forward_return.md) |
+| boll_lower_breakout_grid | close 破下轨事件 × 当日破位深度/N 日位置 双维网格 → 未来 M 日极值收益分布（max/min 双热力图，每格 N/μ/M/[P1,P5,P95,P99]） | [文档](plots/boll_lower_breakout_grid.md) |
 | fund_pair_compare | 两只标的前复权收盘价双轴 + N 日滚动相关系数柱状（标的/窗口/相关窗口均可参数化） | [文档](plots/fund_pair_compare.md) |
 
 ---
