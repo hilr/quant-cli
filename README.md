@@ -115,6 +115,8 @@
 | boll_breakout_forward_return | Bollinger 通道突破事件 → 未来 M 日收益分布（2×3 直方图网格，含基线 alpha 对比，标的/窗口/k/持有期可参数化） | [文档](plots/boll_breakout_forward_return.md) |
 | boll_lower_breakout_grid | close 破下轨事件 × 当日破位深度/N 日位置 双维网格 → 未来 M 日极值收益分布（max/min 双热力图，每格 N/μ/M/[P1,P5,P95,P99]） | [文档](plots/boll_lower_breakout_grid.md) |
 | fund_pair_compare | 两只标的前复权收盘价双轴 + N 日滚动相关系数柱状（标的/窗口/相关窗口均可参数化） | [文档](plots/fund_pair_compare.md) |
+| ah_listing_runup | A+H 上市：港股上市日前 2/3 月买入 A 股 → 持有期内最高收益率分布（总分布 + 按 120 日通道位置分桶） | [文档](plots/ah_listing_runup.md) |
+| ah_listing_bottom_runup | A+H 上市前 120 交易日 A 股底部 → 反弹最高点 形态分析（最低点位置、反弹幅度、反弹持续时间、上市日 vs 峰值，窗口可参数化） | [文档](plots/ah_listing_bottom_runup.md) |
 
 ---
 
