@@ -117,6 +117,10 @@
 | fund_pair_compare | 两只标的前复权收盘价双轴 + N 日滚动相关系数柱状（标的/窗口/相关窗口均可参数化） | [文档](plots/fund_pair_compare.md) |
 | ah_listing_runup | A+H 上市：港股上市日前 2/3 月买入 A 股 → 持有期内最高收益率分布（总分布 + 按 120 日通道位置分桶） | [文档](plots/ah_listing_runup.md) |
 | ah_listing_bottom_runup | A+H 上市前 120 交易日 A 股底部 → 反弹最高点 形态分析（最低点位置、反弹幅度、反弹持续时间、上市日 vs 峰值，窗口可参数化） | [文档](plots/ah_listing_bottom_runup.md) |
+| southbound_flow_rolling | 港股通南向资金 20/60 日滚动净流入 vs 恒生科技 ETF(513180) 双轴图（含贸易战/双减/924 等事件标注） | [文档](plots/southbound_flow_rolling.md) |
+| southbound_etf_analysis | 港股通南向资金 vs 恒生科技 ETF(513180)：累计净流入/60日分位 × forward 1/3/5/20 日收益相关性 + 滚动 corr + 分桶 | [文档](plots/southbound_etf_analysis.md) |
+| southbound_etf_strategy | 南向 q60 阈值择时（≥0.9 买 / ≤0.1 卖）回测 513180 ETF：买卖点 + 净值曲线 + 绩效统计，阈值可参数化 | [文档](plots/southbound_etf_strategy.md) |
+| northbound_holdings_qoq | 北向持股季度环比：价格 × 市值 4 象限分类（逆势/顺势 × 加仓/减仓 + 无显著），按净增减持金额(亿元)排序 TopN | [文档](plots/northbound_holdings_qoq.md) |
 
 ---
 
