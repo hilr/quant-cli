@@ -1,7 +1,7 @@
-"""融资余额 20 日窗口净流入合计 vs 沪深300 双轴图（最近 5 年）。
+"""融资余额 20 日窗口净流入合计 vs 沪深300 双轴图（全部历史）。
 
-数据源：/mnt/readonly_dataset/eastmoney/margin_trade_total_history/{bse,sse,szse}/{year}.csv.gz
-将 bse/sse/sze 三个交易所的 margin_buy_total（融资余额）按日汇总求和，
+数据源：/mnt/dataset/margin_trade_history/{code}.parquet（个股融资融券历史）
+将所有标的的 margin_buy_total（融资余额）按日汇总求和，
 再做 20 个交易日差分（balance[t] - balance[t-20]），得到 20 日窗口净流入合计。
 
 2 条曲线：20 日净流入合计（左轴，亿元），CSI300 日收盘（右轴）。
@@ -22,19 +22,11 @@ COLOR = "#1f77b4"
 
 
 def load_margin_daily(data_path: Path) -> pl.DataFrame:
-    """读所有交易所所有年份的 gz，按日汇总融资余额."""
-    src = data_path / "eastmoney" / "margin_trade_total_history"
-    dfs = []
-    for ex in ("bse", "sse", "szse"):
-        ex_dir = src / ex
-        if not ex_dir.exists():
-            continue
-        for gz in sorted(ex_dir.glob("*.csv.gz")):
-            df = pl.read_csv(gz, infer_schema_length=10000)
-            if "margin_buy_total" not in df.columns:
-                continue
-            dfs.append(df.select(["date", "margin_buy_total"]))
-
+    """读所有个股的融资余额 parquet，按日汇总求和."""
+    dfs = [
+        pl.read_parquet(pf, columns=["date", "margin_buy_total"])
+        for pf in sorted(data_path.glob("*.parquet"))
+    ]
     combined = (
         pl.concat(dfs)
         .with_columns(pl.col("date").str.to_date("%Y-%m-%d").alias("d"))
@@ -59,10 +51,7 @@ def plot(margin: pl.DataFrame, hs300: pl.DataFrame, output_png: Path) -> None:
         ((pl.col("balance") - pl.col("balance").shift(WINDOW)) / 1e8).alias("inflow")
     )
 
-    # 限制到最近 5 年
-    cutoff = margin["date"].max().replace(year=margin["date"].max().year - 5)
-    margin = margin.filter(pl.col("date") >= cutoff)
-    hs300 = hs300.filter(pl.col("date") >= cutoff)
+    # 全部历史
 
     fig, ax_left = plt.subplots(figsize=(15, 7))
     ax_right = ax_left.twinx()
@@ -139,8 +128,8 @@ def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument(
         "--data-path", type=Path,
-        default=Path("/mnt/readonly_dataset"),
-        help="只读原始数据根目录",
+        default=Path("/mnt/dataset/margin_trade_history"),
+        help="融资融券个股历史目录",
     )
     parser.add_argument(
         "--index-file", type=Path,
