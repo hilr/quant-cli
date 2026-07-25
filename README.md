@@ -91,6 +91,7 @@
 | usd_cny_exchange_rate | 人民币兑美元汇率（月度中间价）vs 沪深300（双轴） | [文档](plots/usd_cny_exchange_rate.md) |
 | margin_balance_change | 融资余额月度净增长 vs 沪深300（最近5年） | [文档](plots/margin_balance_change.md) |
 | margin_inflow_20d | 融资余额20日净流入 vs 沪深300（最近5年，日频） | [文档](plots/margin_inflow_20d.md) |
+| margin_balance_vs_hs300 | 全市场融资/融券余额 vs 沪深300（全部历史，三轴） | [文档](plots/margin_balance_vs_hs300.md) |
 | turnover_concentration | A股日成交额集中度（5算法）vs 沪深300 | [文档](plots/turnover_concentration.md) |
 | index_turnover_river | 沪深300/中证500/中证1000/其他 成交额占比 river 图（streamgraph） | [文档](plots/index_turnover_river.md) |
 | new_float_market_cap | 剔除股价影响的月度流通市值变化（扩容/回报/净额）vs 沪深300（双轴） | [文档](plots/new_float_market_cap.md) |
