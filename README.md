@@ -351,6 +351,16 @@ uv run python -m quant.cli ma-crossover-strategy \
 uv run python plots/channel_entry_signals.py --code 512890 --window 120 --k 1.5 --fwd 60
 ```
 
+### margin_inflow_outlier_strategy — 融资净买入异常值择时
+
+当全市场融资日净流入为正且超过过去 N 日均值 + k 倍标准差时买入标的指数，反之卖出平仓，持有到反向信号。窗口 N 与倍数 k 做网格搜索，按年化夏普找最优；标的可切换。详见 [`plots/margin_inflow_outlier_strategy.md`](plots/margin_inflow_outlier_strategy.md)。
+
+```bash
+uv run python plots/margin_inflow_outlier_strategy.py
+# 换标的：--index-file /mnt/dataset/index_quote_history/000905.parquet
+# 自定义网格：--windows 20,30,60 --k-values 2.0,3.0,4.0
+```
+
 ---
 ## 数据流全景
 
