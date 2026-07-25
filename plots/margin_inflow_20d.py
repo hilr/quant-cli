@@ -18,7 +18,9 @@ import polars as pl
 from matplotlib.transforms import blended_transform_factory
 
 WINDOW = 20
+WINDOW_SHORT = 5
 COLOR = "#1f77b4"
+COLOR_SHORT = "#ff7f0e"
 
 
 def load_margin_daily(data_path: Path) -> pl.DataFrame:
@@ -46,24 +48,32 @@ def load_hs300_daily(index_file: Path) -> pl.DataFrame:
 
 
 def plot(margin: pl.DataFrame, hs300: pl.DataFrame, output_png: Path) -> None:
-    # 20 日窗口净流入合计 = balance[t] - balance[t-WINDOW]，单位亿元
+    # 窗口净流入合计 = balance[t] - balance[t-WINDOW]，单位亿元
     margin = margin.with_columns(
-        ((pl.col("balance") - pl.col("balance").shift(WINDOW)) / 1e8).alias("inflow")
+        ((pl.col("balance") - pl.col("balance").shift(WINDOW)) / 1e8).alias("inflow"),
+        ((pl.col("balance") - pl.col("balance").shift(WINDOW_SHORT)) / 1e8).alias("inflow_short"),
     )
 
     # 全部历史
 
     fig, ax_left = plt.subplots(figsize=(15, 7))
     ax_right = ax_left.twinx()
+    ax_third = ax_left.twinx()
+    ax_third.spines["right"].set_position(("axes", 1.085))
 
     ax_left.axhline(0, color="gray", linewidth=0.5, alpha=0.5)
 
     dates = margin["date"].to_list()
-    vals = margin["inflow"].to_list()
     line, = ax_left.plot(
-        dates, vals, "-",
+        dates, margin["inflow"].to_list(), "-",
         color=COLOR, linewidth=0.9, alpha=0.85,
         label=f"{WINDOW}d net inflow (LHS)",
+    )
+
+    line_short, = ax_third.plot(
+        dates, margin["inflow_short"].to_list(), "-",
+        color=COLOR_SHORT, linewidth=0.8, alpha=0.7,
+        label=f"{WINDOW_SHORT}d net inflow (3rd)",
     )
 
     line_hs300, = ax_right.plot(
@@ -89,20 +99,23 @@ def plot(margin: pl.DataFrame, hs300: pl.DataFrame, output_png: Path) -> None:
         )
 
     ax_left.set_xlabel("Date")
-    ax_left.set_ylabel(f"Margin balance {WINDOW}d net inflow (100M CNY)", color="black")
+    ax_left.set_ylabel(f"Margin balance {WINDOW}d net inflow (100M CNY)", color=COLOR)
     ax_right.set_ylabel("CSI300 close (CNY)", color="black")
+    ax_third.set_ylabel(f"Margin balance {WINDOW_SHORT}d net inflow (100M CNY)", color=COLOR_SHORT)
+    ax_left.tick_params(axis="y", labelcolor=COLOR)
     ax_right.tick_params(axis="y", labelcolor="black")
+    ax_third.tick_params(axis="y", labelcolor=COLOR_SHORT)
 
     ax_left.set_title(
-        f"Margin Balance (sum of bse/sse/sze) {WINDOW}d Net Inflow vs CSI300\n"
-        f"Daily; inflow = balance[t] - balance[t-{WINDOW}]"
+        f"Margin Balance {WINDOW}d / {WINDOW_SHORT}d Net Inflow vs CSI300\n"
+        f"Daily; inflow = balance[t] - balance[t-N]"
     )
     ax_left.grid(True, alpha=0.3)
     ax_left.xaxis.set_major_locator(mdates.MonthLocator(interval=1))
     ax_left.xaxis.set_major_formatter(mdates.DateFormatter("%Y-%m"))
     plt.setp(ax_left.get_xticklabels(), rotation=45, ha="right")
 
-    ax_left.legend(handles=[line, line_hs300], loc="upper left", fontsize=9, ncol=2)
+    ax_left.legend(handles=[line, line_short, line_hs300], loc="upper left", fontsize=9, ncol=3)
 
     plt.tight_layout()
     span = dates[-1] - dates[0]
@@ -119,8 +132,11 @@ def plot(margin: pl.DataFrame, hs300: pl.DataFrame, output_png: Path) -> None:
     print(f"\nMargin balance daily: {margin['date'].min()} ~ {margin['date'].max()}, {margin.height} rows")
     latest = margin.tail(1)
     v = latest["inflow"][0]
+    vs = latest["inflow_short"][0]
     if v is not None:
         print(f"  {WINDOW}d net inflow (latest): {v:+.0f} 亿")
+    if vs is not None:
+        print(f"  {WINDOW_SHORT}d net inflow (latest): {vs:+.0f} 亿")
     print(f"  latest balance: {latest['balance'][0] / 1e8:.0f} 亿")
 
 
