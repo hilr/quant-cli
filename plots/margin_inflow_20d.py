@@ -66,19 +66,19 @@ def plot(margin: pl.DataFrame, hs300: pl.DataFrame, output_png: Path) -> None:
     dates = margin["date"].to_list()
     line, = ax_left.plot(
         dates, margin["inflow"].to_list(), "-",
-        color=COLOR, linewidth=0.9, alpha=0.85,
+        color=COLOR, linewidth=0.5, alpha=0.85,
         label=f"{WINDOW}d net inflow (LHS)",
     )
 
     line_short, = ax_third.plot(
         dates, margin["inflow_short"].to_list(), "-",
-        color=COLOR_SHORT, linewidth=0.8, alpha=0.7,
+        color=COLOR_SHORT, linewidth=0.45, alpha=0.7,
         label=f"{WINDOW_SHORT}d net inflow (3rd)",
     )
 
     line_hs300, = ax_right.plot(
         hs300["date"].to_list(), hs300["close"].to_list(), "-",
-        color="black", linewidth=0.9, alpha=0.85, label="CSI300 close (RHS)",
+        color="black", linewidth=0.5, alpha=0.85, label="CSI300 close (RHS)",
     )
 
     trans = blended_transform_factory(ax_left.transData, ax_left.transAxes)
@@ -124,7 +124,7 @@ def plot(margin: pl.DataFrame, hs300: pl.DataFrame, output_png: Path) -> None:
                  ha="right", va="bottom", fontsize=10, color="#222", fontweight="bold",
                  bbox=dict(boxstyle="round,pad=0.3", fc="white", ec="#bbb", alpha=0.85))
     output_png.parent.mkdir(parents=True, exist_ok=True)
-    plt.savefig(output_png, dpi=120, bbox_inches="tight")
+    plt.savefig(output_png, dpi=200, bbox_inches="tight")
     plt.close(fig)
     print(f"Saved to {output_png}")
 
