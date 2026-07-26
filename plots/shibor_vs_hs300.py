@@ -9,15 +9,13 @@ from __future__ import annotations
 import argparse
 import re
 import zipfile
-from datetime import date, datetime
+from datetime import datetime
 from pathlib import Path
 from xml.etree import ElementTree as ET
 
 import matplotlib.dates as mdates
-import matplotlib.patches as mpatches
 import matplotlib.pyplot as plt
 import polars as pl
-from matplotlib.transforms import blended_transform_factory
 
 _XLSX_NS = "{http://schemas.openxmlformats.org/spreadsheetml/2006/main}"
 
@@ -107,7 +105,18 @@ def load_hs300(index_file: Path) -> pl.DataFrame:
     )
 
 
-def plot(shibor: pl.DataFrame, hs300: pl.DataFrame, output_png: Path) -> None:
+def load_regime(regime_file: Path) -> pl.DataFrame:
+    df = pl.read_csv(regime_file)
+    return (
+        df.with_columns([
+            pl.col("start_date").str.to_date("%Y-%m-%d"),
+            pl.col("end_date").str.to_date("%Y-%m-%d"),
+        ])
+        .sort("start_date")
+    )
+
+
+def plot(shibor: pl.DataFrame, hs300: pl.DataFrame, regime: pl.DataFrame, output_png: Path) -> None:
     # 只保留 SHIBOR 起始日期之后的 CSI300，避免左边一段没有 SHIBOR 对照
     shibor_start = shibor["date"].min()
     hs300 = hs300.filter(pl.col("date") >= shibor_start)
@@ -124,21 +133,15 @@ def plot(shibor: pl.DataFrame, hs300: pl.DataFrame, output_png: Path) -> None:
         color="#d62728", linewidth=0.6, alpha=0.75, label="CSI300 close (RHS)",
     )
 
-    trans = blended_transform_factory(ax_left.transData, ax_left.transAxes)
-    events = [
-        (date(2013, 6, 1), "2013 cash crunch"),
-        (date(2015, 6, 1), "2015 crash"),
-        (date(2018, 4, 1), "2018 deleveraging"),
-        (date(2020, 3, 1), "2020 COVID"),
-        (date(2022, 4, 1), "2022 lockdown"),
-        (date(2024, 9, 1), "2024 policy pivot"),
-    ]
-    for d, label in events:
-        ax_left.axvline(d, color="purple", linestyle="--", linewidth=0.4, alpha=0.35)
-        ax_left.text(
-            d, 0.03, f" {label}", color="purple", fontsize=8,
-            rotation=90, va="bottom", transform=trans,
-        )
+    # 小尺度牛熊分段 → 半透明色带
+    regime_in_range = regime.filter(
+        pl.col("start_date") >= shibor_start
+    ).sort("start_date")
+    segs = list(regime_in_range.iter_rows(named=True))
+    for seg in segs:
+        d0, d1 = seg["start_date"], seg["end_date"]
+        color = "#2ca02c" if seg["dir"] == "bull" else "#d62728"
+        ax_left.axvspan(d0, d1, color=color, alpha=0.08)
 
     ax_left.set_xlabel("Date")
     ax_left.set_ylabel("SHIBOR 3M (%)", color="#1f77b4")
@@ -155,14 +158,14 @@ def plot(shibor: pl.DataFrame, hs300: pl.DataFrame, output_png: Path) -> None:
         handles=[line_shibor, line_hs300],
         loc="upper right", fontsize=9,
     )
-
-    plt.tight_layout()
     sb_dates = shibor["date"].to_list()
-    span = sb_dates[-1] - sb_dates[0]
-    ax_left.set_xlim(sb_dates[0], sb_dates[-1] + span * 0.02)
-    ax_left.text(0.99, 0.03, f"最新 {sb_dates[-1]}", transform=ax_left.transAxes,
+    ax_left.text(0.99, 0.82, f"最新 {sb_dates[-1]}", transform=ax_left.transAxes,
                  ha="right", va="bottom", fontsize=10, color="#222", fontweight="bold",
                  bbox=dict(boxstyle="round,pad=0.3", fc="white", ec="#bbb", alpha=0.85))
+
+    plt.tight_layout()
+    span = sb_dates[-1] - sb_dates[0]
+    ax_left.set_xlim(sb_dates[0], sb_dates[-1] + span * 0.02)
     output_png.parent.mkdir(parents=True, exist_ok=True)
     plt.savefig(output_png, dpi=120, bbox_inches="tight")
     plt.close(fig)
@@ -182,6 +185,11 @@ def main() -> None:
         help="沪深300 parquet 文件",
     )
     parser.add_argument(
+        "--regime-file", type=Path,
+        default=Path("/mnt/dataset/csi300_regime_segments/small_segments.csv"),
+        help="牛熊分段 CSV",
+    )
+    parser.add_argument(
         "--output", type=Path,
         default=Path("/mnt/dataset/shibor_3m_vs_hs300.png"),
         help="输出 PNG 路径",
@@ -190,10 +198,12 @@ def main() -> None:
 
     shibor = load_shibor_3m(args.data_path)
     hs300 = load_hs300(args.index_file)
+    regime = load_regime(args.regime_file)
     print(f"SHIBOR 3M: {shibor['date'].min()} ~ {shibor['date'].max()}, {shibor.height} rows")
     print(f"  range: {shibor['rate_3m'].min():.4f}% ~ {shibor['rate_3m'].max():.4f}%")
     print(f"CSI300:   {hs300['date'].min()} ~ {hs300['date'].max()}, {hs300.height} rows")
-    plot(shibor, hs300, args.output)
+    print(f"Regime:   {regime['start_date'].min()} ~ {regime['start_date'].max()}, {regime.height} segments")
+    plot(shibor, hs300, regime, args.output)
 
 
 if __name__ == "__main__":
