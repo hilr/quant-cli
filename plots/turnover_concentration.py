@@ -49,6 +49,10 @@ def plot(d: pl.DataFrame, hs300: pl.DataFrame, output: Path) -> None:
     plt.rcParams["axes.unicode_minus"] = False
 
     dates = d["date"].to_list()
+    # 只保留集中度区间内的沪深300，保证 y 轴贴合显示范围
+    hs300 = hs300.filter(
+        (pl.col("date") >= dates[0]) & (pl.col("date") <= dates[-1])
+    )
     hs_dates = hs300["date"].to_list()
     hs_close = hs300["close"].to_list()
 
@@ -69,6 +73,10 @@ def plot(d: pl.DataFrame, hs300: pl.DataFrame, output: Path) -> None:
         axr.set_ylabel("沪深300", color="#888", fontsize=9)
         axr.tick_params(axis="y", labelcolor="#888")
         axr.spines["right"].set_color("#bbb")
+        # y 轴不从 0 开始，放大波动
+        lo, hi = min(hs_close), max(hs_close)
+        pad = (hi - lo) * 0.05
+        axr.set_ylim(lo - pad, hi + pad)
 
     span = dates[-1] - dates[0]
     axes[-1].set_xlim(dates[0], dates[-1] + span * 0.02)
